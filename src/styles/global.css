@@ -1,0 +1,25 @@
+/* Base rules from the prototype. Component styling stays inline, as designed. */
+* { box-sizing: border-box; }
+:root { --gutter: 40px; }
+body {
+  margin: 0;
+  background: #F6F3EC;
+  color: #1F1E1B;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: #3D6A52; text-decoration: underline; text-underline-offset: 3px; }
+a:hover { color: #1F1E1B; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #3D6A52; outline-offset: 2px; }
+.row-hover:hover { background: #EFEBE2 !important; }
+
+.snapshot-pair { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+
+@media (max-width: 760px) {
+  .snapshot-pair { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  :root { --gutter: 16px; }
+}
