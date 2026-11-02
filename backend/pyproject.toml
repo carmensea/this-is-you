@@ -1,0 +1,28 @@
+[project]
+name = "this-is-you-backend"
+version = "0.1.0"
+description = "Local document archive service for This Is You"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "sqlalchemy>=2.0",
+  "alembic>=1.13",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["this_is_you*"]
+
+[tool.setuptools.package-data]
+this_is_you = ["migrations/script.py.mako"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

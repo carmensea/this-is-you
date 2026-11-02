@@ -1,0 +1,90 @@
+"""Runtime settings, read from the environment. Unsafe values stop the app from starting."""
+from __future__ import annotations
+
+import ipaddress
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Mapping
+
+DEFAULT_MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+
+
+class UnsafeConfiguration(Exception):
+    """The requested configuration would put health documents at risk."""
+
+
+@dataclass(frozen=True)
+class Settings:
+    data_dir: Path
+    host: str = "127.0.0.1"
+    port: int = 8000
+    max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+
+    @property
+    def database_path(self) -> Path:
+        return self.data_dir / "archive.sqlite3"
+
+    @property
+    def originals_dir(self) -> Path:
+        return self.data_dir / "originals"
+
+    @property
+    def incoming_dir(self) -> Path:
+        return self.data_dir / "incoming"
+
+
+def default_data_dir(env: Mapping[str, str] = os.environ) -> Path:
+    home = Path.home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "ThisIsYou"
+    if sys.platform == "win32":
+        return Path(env.get("APPDATA", home / "AppData" / "Roaming")) / "ThisIsYou"
+    return Path(env.get("XDG_DATA_HOME", home / ".local" / "share")) / "this-is-you"
+
+
+def is_loopback_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def enclosing_git_repository(path: Path) -> Path | None:
+    resolved = path.expanduser().resolve()
+    for candidate in (resolved, *resolved.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def validate(settings: Settings) -> Settings:
+    if not is_loopback_host(settings.host):
+        raise UnsafeConfiguration(
+            f"Refusing to bind to {settings.host}. This service has no authentication, "
+            "so it only listens on this computer (127.0.0.1)."
+        )
+    repository = enclosing_git_repository(settings.data_dir)
+    if repository is not None:
+        raise UnsafeConfiguration(
+            f"Refusing to store documents inside the Git repository at {repository}. "
+            "Choose a data directory outside it."
+        )
+    if settings.max_upload_bytes <= 0:
+        raise UnsafeConfiguration("THIS_IS_YOU_MAX_UPLOAD_BYTES must be positive.")
+    return settings
+
+
+def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
+    configured = env.get("THIS_IS_YOU_DATA_DIR")
+    return validate(
+        Settings(
+            data_dir=Path(configured).expanduser() if configured else default_data_dir(env),
+            host=env.get("THIS_IS_YOU_HOST", "127.0.0.1"),
+            port=int(env.get("THIS_IS_YOU_PORT", "8000")),
+            max_upload_bytes=int(env.get("THIS_IS_YOU_MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES)),
+        )
+    )
