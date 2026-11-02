@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { Footer } from '../components/controls';
 import { useStore } from '../state/useStore';
 import { C, MONO, SERIF } from '../theme';
@@ -83,7 +84,12 @@ function CurrentBatch({ v }: { v: VM }) {
                     </span>
                   </>
                 )}{' '}
-                {f.isDone && <span style={{ fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>{f.result}</span>}
+                {f.isDone && <span style={{ fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>{f.result}</span>}{' '}
+                {f.isDone && f.documentId && (
+                  <button onClick={f.onView} style={s.link12}>
+                    View in Documents
+                  </button>
+                )}
               </span>
               <span style={{ fontSize: 12.5, fontWeight: 500, color: f.statusColor }}>{f.statusLabel}</span>
             </div>
@@ -181,10 +187,7 @@ export function ImportScreen() {
         >
           Import
         </h1>
-        <span style={{ fontSize: 13, color: C.ink2, maxWidth: 560 }}>
-          Prototype: processing on this page is simulated. Files you choose yourself are only listed; their contents are
-          not read.
-        </span>
+        <span style={{ fontSize: 13, color: C.ink2, maxWidth: 560 }}>{v.copy.headNote}</span>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '32px 48px', marginTop: 24, alignItems: 'stretch' }}>
         <div
@@ -205,11 +208,10 @@ export function ImportScreen() {
           }}
         >
           <div style={{ fontFamily: SERIF, fontSize: 34, lineHeight: 1.1, letterSpacing: '-0.01em' }}>
-            Drop files or folders here
+            {v.copy.dropTitle}
           </div>
           <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: C.ink2, maxWidth: 560, textWrap: 'pretty' }}>
-            Add years of records at once. Each original is stored unchanged before anything is read, so nothing is lost
-            if extraction fails. Nothing becomes part of your health record until you review it.
+            {v.copy.dropBody}
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 14px', marginTop: 6 }}>
             <button
@@ -224,65 +226,36 @@ export function ImportScreen() {
             >
               Choose folder
             </button>
-            <button
-              onClick={v.loadSample}
-              style={{ border: `1px solid ${C.ink}`, padding: '8px 14px', fontSize: 13, fontWeight: 500 }}
-            >
-              Load sample batch, 7 synthetic files
-            </button>
+            {v.isDemo && (
+              <button
+                onClick={v.loadSample}
+                style={{ border: `1px solid ${C.ink}`, padding: '8px 14px', fontSize: 13, fontWeight: 500 }}
+              >
+                Load sample batch, 7 synthetic files
+              </button>
+            )}
           </div>
-          <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.muted, marginTop: 4 }}>
-            PDF · CSV · XML · JSON · ZIP · patient portal and device exports
-          </div>
+          <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.muted, marginTop: 4 }}>{v.copy.formats}</div>
         </div>
         <div style={{ flex: '1 1 420px', minWidth: 0, borderTop: `1px solid ${C.ink}`, paddingTop: 10 }}>
-          <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 22, margin: '0 0 6px' }}>What can be read</h2>
+          <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 22, margin: '0 0 6px' }}>{v.copy.readTitle}</h2>
           <div style={{ display: 'grid', gridTemplateColumns: '70px minmax(0,1fr)', gap: '0 14px', fontSize: 12.5 }}>
-            <span style={{ fontFamily: MONO, fontWeight: 500, padding: '8px 0', borderBottom: `1px solid ${C.rule2}` }}>
-              PDF
-            </span>
-            <span style={{ padding: '8px 0', borderBottom: `1px solid ${C.rule2}`, color: C.ink2 }}>
-              Lab, imaging and pathology reports, clinical notes. Scanned pages are read with text recognition and
-              always need review.
-            </span>
-            <span style={{ fontFamily: MONO, fontWeight: 500, padding: '8px 0', borderBottom: `1px solid ${C.rule2}` }}>
-              CSV
-            </span>
-            <span style={{ padding: '8px 0', borderBottom: `1px solid ${C.rule2}`, color: C.ink2 }}>
-              Smart scale and device exports. Columns are mapped to measurements you can check.
-            </span>
-            <span style={{ fontFamily: MONO, fontWeight: 500, padding: '8px 0', borderBottom: `1px solid ${C.rule2}` }}>
-              XML
-            </span>
-            <span style={{ padding: '8px 0', borderBottom: `1px solid ${C.rule2}`, color: C.ink2 }}>
-              Patient portal clinical documents (CCD). Apple Health export.xml is stored but not yet read.
-            </span>
-            <span style={{ fontFamily: MONO, fontWeight: 500, padding: '8px 0', borderBottom: `1px solid ${C.rule2}` }}>
-              JSON
-            </span>
-            <span style={{ padding: '8px 0', borderBottom: `1px solid ${C.rule2}`, color: C.ink2 }}>
-              FHIR bundles from patient portals.
-            </span>
-            <span style={{ fontFamily: MONO, fontWeight: 500, padding: '8px 0', borderBottom: `1px solid ${C.rule2}` }}>
-              ZIP
-            </span>
-            <span style={{ padding: '8px 0', borderBottom: `1px solid ${C.rule2}`, color: C.ink2 }}>
-              Folders and exports. Contents are handled file by file.
-            </span>
-            <span
-              style={{
-                fontFamily: MONO,
-                fontWeight: 500,
-                padding: '8px 0',
-                borderBottom: `1px solid ${C.rule2}`,
-                color: C.rust,
-              }}
-            >
-              Other
-            </span>
-            <span style={{ padding: '8px 0', borderBottom: `1px solid ${C.rule2}`, color: C.ink2 }}>
-              Images, Word documents and unknown formats are stored as originals. Nothing is extracted.
-            </span>
+            {v.copy.readRows.map((r) => (
+              <Fragment key={r.k}>
+                <span
+                  style={{
+                    fontFamily: MONO,
+                    fontWeight: 500,
+                    padding: '8px 0',
+                    borderBottom: `1px solid ${C.rule2}`,
+                    color: r.warn ? C.rust : undefined,
+                  }}
+                >
+                  {r.k}
+                </span>
+                <span style={{ padding: '8px 0', borderBottom: `1px solid ${C.rule2}`, color: C.ink2 }}>{r.text}</span>
+              </Fragment>
+            ))}
           </div>
         </div>
       </div>
@@ -300,36 +273,28 @@ export function ImportScreen() {
             <span style={{ fontFamily: MONO, fontSize: 12, color: C.ink3 }}>1</span>
             <span style={{ fontSize: 14, fontWeight: 600 }}>Stored</span>
           </div>
-          <p style={{ margin: '4px 0 0 22px', fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>
-            The original file is copied into the archive unchanged, with a checksum.
-          </p>
+          <p style={{ margin: '4px 0 0 22px', fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>{v.copy.steps[0]}</p>
         </div>
         <div style={{ padding: '14px 20px', borderRight: `1px solid ${C.rule2}` }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
             <span style={{ fontFamily: MONO, fontSize: 12, color: C.ink3 }}>2</span>
             <span style={{ fontSize: 14, fontWeight: 600 }}>Read</span>
           </div>
-          <p style={{ margin: '4px 0 0 22px', fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>
-            Text and tables are recognized and the document type is detected.
-          </p>
+          <p style={{ margin: '4px 0 0 22px', fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>{v.copy.steps[1]}</p>
         </div>
         <div style={{ padding: '14px 20px', borderRight: `1px solid ${C.rule2}` }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
             <span style={{ fontFamily: MONO, fontSize: 12, color: C.ink3 }}>3</span>
             <span style={{ fontSize: 14, fontWeight: 600 }}>Extracted</span>
           </div>
-          <p style={{ margin: '4px 0 0 22px', fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>
-            Values, dates, units and ranges are proposed, each with a confidence level.
-          </p>
+          <p style={{ margin: '4px 0 0 22px', fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>{v.copy.steps[2]}</p>
         </div>
         <div style={{ padding: '14px 20px' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
             <span style={{ fontFamily: MONO, fontSize: 12, color: C.ink3 }}>4</span>
             <span style={{ fontSize: 14, fontWeight: 600, color: C.green }}>Reviewed</span>
           </div>
-          <p style={{ margin: '4px 0 0 22px', fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>
-            You confirm each value against the original. Only then is it health information in your archive.
-          </p>
+          <p style={{ margin: '4px 0 0 22px', fontSize: 12.5, color: C.ink2, lineHeight: 1.45 }}>{v.copy.steps[3]}</p>
         </div>
       </div>
       {v.impHasBatch && <CurrentBatch v={v} />}

@@ -1,7 +1,9 @@
 import type { CSSProperties, HTMLAttributes, ReactNode } from 'react';
+import { useStore } from '../state/useStore';
 import { C, MONO } from '../theme';
 
 export function Footer() {
+  const isDemo = useStore().archive.kind === 'demo';
   return (
     <footer
       style={{
@@ -16,7 +18,7 @@ export function Footer() {
       }}
     >
       <span>This Is You, open-source personal health archive</span>
-      <span>Synthetic demonstration data</span>
+      <span>{isDemo ? 'Synthetic demonstration data' : 'Stored only on this computer'}</span>
       <span>Shows documented information as recorded. It does not interpret results or give medical advice.</span>
     </footer>
   );

@@ -1,5 +1,6 @@
 import { addMonths, fLong, fShort } from '../domain/dates';
 import { C } from '../theme';
+import { openDemoArchive, openPersonalArchive } from '../services/archiveMode';
 import { VIEWS, VIEW_LABELS, type AppStore } from '../state/store';
 
 /** Header, snapshot bar and everything else shown on every screen. */
@@ -10,7 +11,16 @@ export function shellVM(store: AppStore) {
     v = s.view;
   return {
     patientName: store.archive.patientName,
-    patientLine: 'Patient: ' + store.archive.patientName + ' (fictional) · DOB ' + fShort(store.archive.born),
+    patientLine: store.archive.born
+      ? 'Patient: ' + store.archive.patientName + ' (fictional) · DOB ' + fShort(store.archive.born)
+      : '',
+    isDemo: store.archive.kind === 'demo',
+    archiveLabel:
+      store.archive.kind === 'demo'
+        ? `Archive: ${store.archive.patientName} (sample)`
+        : 'Archive: your documents (local)',
+    switchLabel: store.archive.kind === 'demo' ? 'Leave demo' : 'Open demo archive',
+    switchArchive: store.archive.kind === 'demo' ? openPersonalArchive : openDemoArchive,
     nav: VIEWS.map((k) => ({
       label: VIEW_LABELS[k],
       onClick: () => store.go(k),

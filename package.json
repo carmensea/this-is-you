@@ -9,9 +9,16 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "backend:setup": "python3 -m venv backend/.venv && backend/.venv/bin/pip install -r backend/requirements.lock && backend/.venv/bin/pip install --no-deps -e backend",
+    "backend": "backend/.venv/bin/python -m this_is_you",
+    "test:backend": "cd backend && .venv/bin/pytest",
+    "test:all": "vitest run && cd backend && .venv/bin/pytest"
   },
   "dependencies": {
+    "@fontsource-variable/newsreader": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

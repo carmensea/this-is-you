@@ -42,7 +42,13 @@ export function Header({ v }: { v: VM }) {
           ))}
         </nav>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 20, padding: '12px 0' }}>
-          <span style={{ fontFamily: MONO, fontSize: 12, color: C.muted }}>Archive: {v.patientName} (sample)</span>
+          <span style={{ fontFamily: MONO, fontSize: 12, color: C.muted }}>{v.archiveLabel}</span>
+          <button
+            onClick={v.switchArchive}
+            style={{ fontSize: 13, color: C.muted, borderBottom: `1px solid ${C.faint}` }}
+          >
+            {v.switchLabel}
+          </button>
           <button
             onClick={v.openSettings}
             style={{ fontSize: 13, color: C.muted, borderBottom: `1px solid ${C.faint}` }}

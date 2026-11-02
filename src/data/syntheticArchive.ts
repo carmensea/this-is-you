@@ -1,5 +1,5 @@
 // Fictional demonstration data. Every person, provider, value and document here is invented.
-// Replace with a real source through services/archiveApi.ts; screens never import this file.
+// Only services/demoArchiveApi.ts imports this, and real archives never load that module.
 import { addDays, fLong, fShort, toT } from '../domain/dates';
 import { DCATL } from '../domain/vocabulary';
 import type { Archive, ArchiveDocument, Diagnosis, DocumentCategory, DocumentProvenance, EventType, HealthEvent, ImportFile, ImportRecord, LabCode, LowConfidenceSet, Marker, MarkerCategory, Medication, TreatmentPeriod, WeightReading } from '../domain/types';
@@ -1016,6 +1016,7 @@ const IMPORTS: ImportRecord[] = [
   },
 ];
 export const syntheticArchive: Archive = {
+  kind: 'demo',
   patientName: 'Jordan Vale',
   start: START,
   today: TODAY,

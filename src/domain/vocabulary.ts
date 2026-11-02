@@ -88,4 +88,8 @@ export const OUTCOME: Record<ImportOutcome, { label: string; color: string; read
   unsupported: { label: 'Unsupported, original stored', color: '#8A3F1F', read: false, ext: false },
   possible: { label: 'Possible duplicate', color: '#8A5A1F', read: true, ext: true },
   local: { label: 'Listed only (prototype)', color: '#55524B', read: false, ext: false },
+  uploading: { label: 'In progress', color: '#4F4C45', read: false, ext: false },
+  stored: { label: 'Stored, not read', color: '#3D6A52', read: false, ext: false },
+  rejected: { label: 'Not accepted, nothing stored', color: '#8A3F1F', read: false, ext: false },
+  interrupted: { label: 'Upload failed, nothing stored', color: '#8A3F1F', read: false, ext: false },
 };

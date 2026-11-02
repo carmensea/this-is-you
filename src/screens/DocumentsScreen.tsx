@@ -8,6 +8,28 @@ import { documentsVM } from '../viewmodels/documents';
 
 type VM = ReturnType<typeof shellVM> & ReturnType<typeof documentsVM>;
 
+/** The real stored file, shown by the browser's own PDF viewer. */
+function OriginalFile({ title, url }: { title: string; url: string }) {
+  return (
+    <>
+      <div style={{ marginTop: 8, background: '#FFFEFB', border: `1px solid ${C.rule}` }}>
+        <iframe
+          key={url}
+          title={`Original file: ${title}`}
+          src={url}
+          style={{ display: 'block', width: '100%', height: 720, border: 0 }}
+        />
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', marginTop: 10, fontSize: 12 }}>
+        <a href={url} target="_blank" rel="noreferrer">
+          Open original in a new tab
+        </a>
+        <a href={`${url}?download=true`}>Download original</a>
+      </div>
+    </>
+  );
+}
+
 function DocumentList({ v }: { v: VM }) {
   return (
     <section aria-label="Document list" style={{ flex: '1 1 520px', minWidth: 0 }}>
@@ -83,6 +105,14 @@ function DocumentList({ v }: { v: VM }) {
               )}
             </Fragment>
           ))}{' '}
+          {v.dNoDocuments && (
+            <p style={{ margin: '24px 8px', fontSize: 14, color: C.ink2 }}>
+              No documents yet.{' '}
+              <button onClick={v.goImport} style={s.link13}>
+                Go to Import
+              </button>
+            </p>
+          )}
           {v.dEmpty && (
             <p style={{ fontSize: 14, color: C.ink2, padding: '16px 8px' }}>
               No documents match.{' '}
@@ -230,104 +260,108 @@ function DocumentDetail({ v }: { v: VM }) {
               </div>
             )}
           </div>
-          <div
-            style={{
-              marginTop: 8,
-              background: '#FFFEFB',
-              border: `1px solid ${C.rule}`,
-              padding: '26px 28px',
-              minHeight: 340,
-            }}
-          >
+          {v.detail.ddContentUrl ? (
+            <OriginalFile title={v.detail.ddFile} url={v.detail.ddContentUrl} />
+          ) : (
             <div
               style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 16,
-                borderBottom: `1.5px solid ${C.ink}`,
-                paddingBottom: 10,
-                flexWrap: 'wrap',
+                marginTop: 8,
+                background: '#FFFEFB',
+                border: `1px solid ${C.rule}`,
+                padding: '26px 28px',
+                minHeight: 340,
               }}
             >
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{v.detail.ddHead}</span>
-              <span style={{ fontFamily: MONO, fontSize: 10.5, color: C.muted }}>SYNTHETIC SAMPLE RECORD</span>
-            </div>
-            <div style={{ fontSize: 12, color: C.ink2, marginTop: 8 }}>{v.patientLine}</div>
-            <div style={s.sub12}>{v.detail.ddSub}</div>
-            {v.detail.ddIsLab && (
-              <div style={{ marginTop: 16 }}>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(0,1.6fr) 64px 26px minmax(0,1fr) 92px',
-                    gap: 6,
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    color: C.muted,
-                    borderBottom: `1px solid ${C.ink}`,
-                    padding: '0 4px 4px',
-                  }}
-                >
-                  <span>Test</span>
-                  <span style={s.alignRight}>Result</span>
-                  <span>Flag</span>
-                  <span>Reference</span>
-                  <span>Units</span>
-                </div>
-                {v.detail.ddLines.map((l, i4) => (
-                  <button
-                    key={i4}
-                    onClick={l.onClick}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 16,
+                  borderBottom: `1.5px solid ${C.ink}`,
+                  paddingBottom: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{v.detail.ddHead}</span>
+                <span style={{ fontFamily: MONO, fontSize: 10.5, color: C.muted }}>SYNTHETIC SAMPLE RECORD</span>
+              </div>
+              <div style={{ fontSize: 12, color: C.ink2, marginTop: 8 }}>{v.patientLine}</div>
+              <div style={s.sub12}>{v.detail.ddSub}</div>
+              {v.detail.ddIsLab && (
+                <div style={{ marginTop: 16 }}>
+                  <div
                     style={{
-                      width: '100%',
                       display: 'grid',
                       gridTemplateColumns: 'minmax(0,1.6fr) 64px 26px minmax(0,1fr) 92px',
                       gap: 6,
-                      fontSize: 11.5,
-                      padding: '5px 4px',
-                      borderBottom: '1px solid #EEEAE1',
-                      background: l.bg,
-                      outline: l.outline,
-                      fontFamily: MONO,
+                      fontSize: 10.5,
+                      fontWeight: 600,
+                      color: C.muted,
+                      borderBottom: `1px solid ${C.ink}`,
+                      padding: '0 4px 4px',
                     }}
                   >
-                    <span style={{ fontFamily: SANS }}>{l.name}</span>
-                    <span style={s.alignRight}>{l.value}</span>
-                    <span style={{ color: C.rust, fontWeight: 500 }}>{l.flag}</span>
-                    <span>{l.ref}</span>
-                    <span>{l.unit}</span>
-                  </button>
-                ))}
-              </div>
-            )}{' '}
-            {v.detail.ddNoPreview && (
-              <div
-                style={{
-                  marginTop: 18,
-                  background: C.hover,
-                  border: `1px solid ${C.rule2}`,
-                  minHeight: 220,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: 24,
-                }}
-              >
-                <span
+                    <span>Test</span>
+                    <span style={s.alignRight}>Result</span>
+                    <span>Flag</span>
+                    <span>Reference</span>
+                    <span>Units</span>
+                  </div>
+                  {v.detail.ddLines.map((l, i4) => (
+                    <button
+                      key={i4}
+                      onClick={l.onClick}
+                      style={{
+                        width: '100%',
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(0,1.6fr) 64px 26px minmax(0,1fr) 92px',
+                        gap: 6,
+                        fontSize: 11.5,
+                        padding: '5px 4px',
+                        borderBottom: '1px solid #EEEAE1',
+                        background: l.bg,
+                        outline: l.outline,
+                        fontFamily: MONO,
+                      }}
+                    >
+                      <span style={{ fontFamily: SANS }}>{l.name}</span>
+                      <span style={s.alignRight}>{l.value}</span>
+                      <span style={{ color: C.rust, fontWeight: 500 }}>{l.flag}</span>
+                      <span>{l.ref}</span>
+                      <span>{l.unit}</span>
+                    </button>
+                  ))}
+                </div>
+              )}{' '}
+              {v.detail.ddNoPreview && (
+                <div
                   style={{
-                    fontFamily: MONO,
-                    fontSize: 11.5,
-                    color: C.muted,
-                    textAlign: 'center',
-                    lineHeight: 1.6,
-                    maxWidth: 360,
+                    marginTop: 18,
+                    background: C.hover,
+                    border: `1px solid ${C.rule2}`,
+                    minHeight: 220,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 24,
                   }}
                 >
-                  {v.detail.ddPlaceholder}
-                </span>
-              </div>
-            )}
-          </div>
+                  <span
+                    style={{
+                      fontFamily: MONO,
+                      fontSize: 11.5,
+                      color: C.muted,
+                      textAlign: 'center',
+                      lineHeight: 1.6,
+                      maxWidth: 360,
+                    }}
+                  >
+                    {v.detail.ddPlaceholder}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           {v.detail.ddHasLines && (
             <div style={{ marginTop: 26 }}>
               <div

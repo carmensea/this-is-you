@@ -132,7 +132,9 @@ export function documentsVM(store: AppStore) {
     dSnapLabel: 'Only files in the record by ' + fShort(cur),
     dReset: () => store.setState({ dQuery: '', dTypes: {}, dStatus: {}, dSnapOnly: false }),
     dRows: rows,
-    dEmpty: !list.length,
+    dEmpty: !list.length && archive.documents.length > 0,
+    dNoDocuments: archive.documents.length === 0,
+    goImport: () => store.go('import'),
   };
   if (!sel) return { ...out, detail: null };
   const k = st(sel),
@@ -172,19 +174,26 @@ export function documentsVM(store: AppStore) {
         ? 'In the record by the snapshot date, ' + fShort(cur) + '.'
         : 'Not yet in the record on the snapshot date, ' + fShort(cur) + '. Documented ' + fShort(sel.documented) + '.',
       ddKnownColor: known ? C.ink2 : C.rust,
+      ddContentUrl: sel.contentUrl ?? null,
       ddHasNote: !!sel.note,
       ddNote: sel.note || '',
       ddFields: [
         { k: 'Document type', v: DCATL[sel.cat] },
-        { k: sel.cat === 'lab' ? 'Collected' : 'Date of service', v: sel.dateLabel || fLong(sel.date) },
-        { k: 'Documented', v: sel.dateLabel ? 'Exported 27 Oct 2026' : fLong(sel.documented) },
+        {
+          k: sel.cat === 'lab' ? 'Collected' : 'Date of service',
+          v: sel.dateUnknown ? 'Not recorded' : sel.dateLabel || fLong(sel.date),
+        },
+        {
+          k: 'Documented',
+          v: sel.dateUnknown ? 'Not recorded' : sel.dateLabel ? 'Exported 27 Oct 2026' : fLong(sel.documented),
+        },
         { k: 'Source', v: sel.source },
         { k: sel.cat === 'lab' ? 'Ordered by' : 'Clinician', v: sel.who || 'Not stated' },
         { k: 'Format', v: sel.format },
-        { k: 'Pages', v: sel.pages ? String(sel.pages) : 'Not applicable' },
+        { k: 'Pages', v: sel.contentUrl ? 'Not read' : sel.pages ? String(sel.pages) : 'Not applicable' },
         { k: 'File size', v: sel.size },
         { k: 'Imported', v: sel.via + ', ' + sel.imported },
-        { k: 'Checksum, SHA-256', v: sel.hash.slice(0, 16) + '…' },
+        { k: 'Checksum, SHA-256', v: sel.contentUrl ? sel.hash : sel.hash.slice(0, 16) + '…' },
         { k: 'Original file', v: 'Stored unchanged since import' },
         {
           k: 'Extracted',
@@ -253,18 +262,16 @@ export function documentsVM(store: AppStore) {
         (sel.cat === 'lab'
           ? 'Collected ' + fShort(sel.date) + ' · Reported ' + fShort(sel.documented)
           : DCATL[sel.cat] + ' · ' + (sel.dateLabel || fShort(sel.date))) + (sel.who ? ' · ' + sel.who : ''),
-      ddLines: lines
-        .slice(page * 8, page * 8 + 8)
-        .map(({ mk, r }) => ({
-          name: mk.name,
-          value: fmtR(r),
-          flag: r.flag,
-          ref: rangeOnly(r),
-          unit: r.unit,
-          bg: s.dHL === mk.key ? C.greenT : 'transparent',
-          outline: s.dHL === mk.key ? '1px solid ' + C.green : '1px solid transparent',
-          onClick: () => store.setState({ dHL: mk.key }),
-        })),
+      ddLines: lines.slice(page * 8, page * 8 + 8).map(({ mk, r }) => ({
+        name: mk.name,
+        value: fmtR(r),
+        flag: r.flag,
+        ref: rangeOnly(r),
+        unit: r.unit,
+        bg: s.dHL === mk.key ? C.greenT : 'transparent',
+        outline: s.dHL === mk.key ? '1px solid ' + C.green : '1px solid transparent',
+        onClick: () => store.setState({ dHL: mk.key }),
+      })),
       ddHasLines: lines.length > 0 && !sel.dup,
       ddLinesCount: plural(lines.length, 'measurement') + ' extracted from this report',
       ddExtracted: lines.map(({ mk, r }, idx) => {

@@ -9,8 +9,12 @@ import { OverviewScreen } from './screens/OverviewScreen';
 import { ReviewScreen } from './screens/ReviewScreen';
 import { useStore } from './state/useStore';
 import { VIEWS, type View } from './state/store';
+import { NoRecordsYet } from './screens/NoRecordsYet';
 import { C } from './theme';
 import { shellVM } from './viewmodels/shell';
+
+/** These screens show extracted records, and a real archive has none yet. */
+const NEEDS_RECORDS: View[] = ['overview', 'biomarkers', 'history', 'compare'];
 
 const viewFromHash = (): View | null => {
   const h = window.location.hash.replace(/^#\/?/, '') as View;
@@ -32,22 +36,25 @@ export function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, [store]);
   useEffect(() => {
-    if (viewFromHash() !== view) window.location.hash = '/' + view;
-  }, [view]);
+    // Reads the store, not this render's value: the address may have just changed the view.
+    if (viewFromHash() !== store.state.view) window.location.hash = '/' + store.state.view;
+  }, [store, view]);
 
   const v = shellVM(store);
+  const isDemo = store.archive.kind === 'demo';
   return (
     <div style={{ minHeight: '100vh', background: C.paper }}>
       <Header v={v} />
-      <DemoBanner />
+      {isDemo && <DemoBanner />}
       {notice && <Notice v={v} />}
-      {view !== 'overview' && <SnapshotBar v={v} />}
-      {view === 'overview' && <OverviewScreen />}
-      {view === 'biomarkers' && <BiomarkersScreen />}
-      {view === 'history' && <HistoryScreen />}
+      {view !== 'overview' && (isDemo || !NEEDS_RECORDS.includes(view)) && <SnapshotBar v={v} />}
+      {!isDemo && NEEDS_RECORDS.includes(view) && <NoRecordsYet />}
+      {isDemo && view === 'overview' && <OverviewScreen />}
+      {isDemo && view === 'biomarkers' && <BiomarkersScreen />}
+      {isDemo && view === 'history' && <HistoryScreen />}
       {view === 'documents' && <DocumentsScreen />}
       {view === 'import' && (rvDoc ? <ReviewScreen /> : <ImportScreen />)}
-      {view === 'compare' && <CompareScreen />}
+      {isDemo && view === 'compare' && <CompareScreen />}
     </div>
   );
 }

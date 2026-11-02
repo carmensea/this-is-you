@@ -2,8 +2,23 @@
 import { addMonths, fLong } from '../domain/dates';
 import { rangeOnly, fmtR } from '../domain/format';
 import { DCATL } from '../domain/vocabulary';
-import type { Archive, ArchiveDocument, HealthEvent, ImportFile, ImportJob, ISODate, LowConfidenceNote, SnapshotMode } from '../domain/types';
-import { simulateProcessing } from '../services/importService';
+import type {
+  Archive,
+  ArchiveDocument,
+  HealthEvent,
+  ImportFile,
+  ImportJob,
+  ISODate,
+  LowConfidenceNote,
+  SnapshotMode,
+} from '../domain/types';
+import type { DocumentsBackend } from '../services/archiveApi';
+import { listOnly, simulateProcessing } from '../services/importService';
+import { todayLocal, withDocuments } from '../services/localArchiveApi';
+import { fShort } from '../domain/dates';
+import { fmtSize, kindOf } from '../domain/format';
+
+const MAX_PARALLEL_UPLOADS = 2;
 
 export type View = 'overview' | 'biomarkers' | 'history' | 'documents' | 'compare' | 'import';
 export const VIEWS: View[] = ['overview', 'biomarkers', 'history', 'documents', 'compare', 'import'];
@@ -163,8 +178,9 @@ export class AppStore {
   private seq = 0;
 
   constructor(
-    readonly archive: Archive,
+    public archive: Archive,
     overrides: Partial<AppState> = {},
+    private backend: DocumentsBackend | null = null,
   ) {
     this.state = { ...initialState, ...overrides };
   }
@@ -299,4 +315,92 @@ export class AppStore {
       (imp) => this.setState({ imp }),
     );
   };
+
+  // Real uploads
+  get maxUploadBytes() {
+    return this.backend?.maxUploadBytes ?? 0;
+  }
+
+  /** Takes files from the picker or a drop. The demo archive only lists them. */
+  receiveFiles = (files: File[]) => {
+    if (this.backend) this.uploadFiles(files, this.backend);
+    else this.addFiles(files.map((f) => listOnly(f)));
+  };
+
+  private patchJob = (id: string, patch: Partial<ImportJob>) =>
+    this.setState((st) => ({ imp: st.imp.map((j) => (j.id === id ? { ...j, ...patch } : j)) }));
+
+  private uploadFiles(files: File[], backend: DocumentsBackend) {
+    const queue: { job: ImportJob; file: File }[] = [];
+    const jobs = files.map((file) => {
+      const name = file.webkitRelativePath || file.name;
+      const job: ImportJob = {
+        name,
+        size: fmtSize(file.size),
+        kind: kindOf(file.name),
+        outcome: 'uploading',
+        result: '',
+        id: 'u' + ++this.seq,
+        pct: 0,
+        done: false,
+      };
+      const refusal = !file.name.toLowerCase().endsWith('.pdf')
+        ? 'Only PDF files can be imported in this version. Nothing was stored.'
+        : file.size > backend.maxUploadBytes
+          ? `This file is larger than the ${Math.floor(backend.maxUploadBytes / 1048576)} MB limit. Nothing was stored.`
+          : null;
+      if (refusal) return { ...job, outcome: 'rejected' as const, result: refusal, pct: 100, done: true };
+      queue.push({ job, file });
+      return job;
+    });
+    this.setState((st) => ({ imp: jobs.concat(st.imp) }));
+    const work = async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) {
+        const { job, file } = next;
+        const result = await backend.upload(file, (fraction) =>
+          this.patchJob(job.id, { pct: Math.min(99, Math.round(fraction * 100)) }),
+        );
+        if (result.kind === 'stored') {
+          this.patchJob(job.id, {
+            outcome: 'stored',
+            pct: 100,
+            done: true,
+            documentId: result.document.id,
+            result: 'Stored unchanged on this computer. Its contents have not been read.',
+          });
+        } else if (result.kind === 'duplicate') {
+          const d = result.document;
+          this.patchJob(job.id, {
+            outcome: 'duplicate',
+            pct: 100,
+            done: true,
+            documentId: d.id,
+            result: `Identical to ${d.title}, imported ${fShort(d.date)}. Set aside; nothing was added.`,
+          });
+        } else {
+          this.patchJob(job.id, {
+            outcome: result.kind === 'rejected' ? 'rejected' : 'interrupted',
+            pct: 100,
+            done: true,
+            result: result.message,
+          });
+        }
+        if (result.kind === 'stored') await this.refreshDocuments(backend);
+      }
+    };
+    return Promise.all(Array.from({ length: Math.min(MAX_PARALLEL_UPLOADS, queue.length) }, work));
+  }
+
+  private async refreshDocuments(backend: DocumentsBackend) {
+    try {
+      const documents = await backend.listDocuments();
+      const today = todayLocal(),
+        previous = this.archive.today;
+      this.archive = { ...withDocuments(this.archive, documents), today };
+      // Someone looking at today keeps looking at today, even past midnight.
+      this.setState((st) => (st.cur === previous ? { cur: today } : {}));
+    } catch {
+      // The upload itself succeeded. The list catches up on the next refresh or page load.
+    }
+  }
 }

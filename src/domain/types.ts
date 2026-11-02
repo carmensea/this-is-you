@@ -131,6 +131,10 @@ export interface ArchiveDocument {
   dup?: string;
   hash: string;
   search: string;
+  /** The document's own date is unknown; `date` holds the import date. */
+  dateUnknown?: boolean;
+  /** Where the original file can be fetched. Only real documents have one. */
+  contentUrl?: string;
 }
 
 export interface WeightReading {
@@ -158,7 +162,18 @@ export type LowConfidenceNote = { read?: string; unit?: string; reason: string }
 /** Keyed by marker key, with `_date` for a doubtful document date. */
 export type LowConfidenceSet = { _date?: string } & { [markerKey: string]: LowConfidenceNote | string | undefined };
 
-export type ImportOutcome = 'duplicate' | 'parsed' | 'failed' | 'unsupported' | 'possible' | 'local';
+export type ImportOutcome =
+  | 'duplicate'
+  | 'parsed'
+  | 'failed'
+  | 'unsupported'
+  | 'possible'
+  | 'local'
+  // Real uploads
+  | 'uploading'
+  | 'stored'
+  | 'rejected'
+  | 'interrupted';
 
 export interface ImportFile {
   name: string;
@@ -172,10 +187,14 @@ export interface ImportJob extends ImportFile {
   id: string;
   pct: number;
   done: boolean;
+  /** The stored document, once a real upload has one. */
+  documentId?: string;
 }
 
 /** Everything the screens read. One call loads it; see services/archiveApi.ts. */
 export interface Archive {
+  /** Fictional demonstration data, or this person's own stored files. Never both. */
+  kind: 'demo' | 'personal';
   patientName: string;
   start: ISODate;
   today: ISODate;
