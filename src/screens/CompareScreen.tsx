@@ -119,7 +119,7 @@ function SnapshotCell({ c }: { c: VM['cGroups'][number]['rows'][number]['a'] }) 
           </span>
           <span style={{ display: 'block', fontSize: 11, color: C.ink3, marginTop: 1 }}>{c.ref}</span>
           <a href="#" onClick={c.onDoc} style={{ fontSize: 11.5 }}>
-            Source
+            {c.sourceLabel}
           </a>
         </>
       )}{' '}
@@ -836,7 +836,7 @@ export function CompareScreen() {
       <AtAGlance v={v} />
       <Measurements v={v} />
       <Trend v={v} />
-      <Weight v={v} />
+      {v.hasWeight && <Weight v={v} />}
       <MedicalHistory v={v} />
       <Footer />
     </main>

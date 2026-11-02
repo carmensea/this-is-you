@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { ArchiveUnavailable } from './screens/ArchiveUnavailable';
-import { isDemoMode } from './services/archiveMode';
+import { isDemoMode, viewFromHash } from './services/archiveMode';
 import { connectLocalArchive } from './services/localArchiveApi';
 import { AppStore } from './state/store';
 import { StoreContext } from './state/useStore';
@@ -25,13 +25,14 @@ async function start() {
   if (isDemoMode()) {
     document.title = 'This Is You (fictional demo)';
     const { demoArchiveApi } = await import('./services/demoArchiveApi');
-    show(new AppStore(await demoArchiveApi.loadArchive()));
+    show(new AppStore(await demoArchiveApi.loadArchive(), { view: viewFromHash() ?? 'overview' }));
     return;
   }
   try {
     const { api, backend } = await connectLocalArchive();
     const archive = await api.loadArchive();
-    const store = new AppStore(archive, { view: 'documents', cur: archive.today }, backend);
+    const store = // Start on the screen asked for. Passing through Documents would load a PDF nobody asked to see.
+    new AppStore(archive, { view: viewFromHash() ?? 'documents', cur: archive.today }, backend);
     show(store);
     store.watchReading();
   } catch {

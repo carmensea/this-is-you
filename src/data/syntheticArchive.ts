@@ -1017,6 +1017,15 @@ const IMPORTS: ImportRecord[] = [
 ];
 export const syntheticArchive: Archive = {
   kind: 'demo',
+  chartStart: 2009,
+  chartEnd: 2027,
+  firstYear: 2009,
+  lastYear: 2026,
+  drawDocumented: DRAWS.map(([d]) => addDays(d, 4)),
+  drawDocuments: DRAWS.map((_, i) => 'lab-' + i),
+  unplotted: [],
+  observations: [],
+  testNames: [],
   patientName: 'Jordan Vale',
   start: START,
   today: TODAY,

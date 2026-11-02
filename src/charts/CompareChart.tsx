@@ -1,11 +1,11 @@
 import type { ReactElement } from 'react';
 import { useState } from 'react';
 import { fShort, toT } from '../domain/dates';
-import { fmtR, niceTicks, refText } from '../domain/format';
+import { USER_ENTERED, fmtR, niceTicks, refText } from '../domain/format';
 import type { LabResult, Marker, ISODate } from '../domain/types';
 import { useStore } from '../state/useStore';
 import { C, MONO, SANS, SERIF } from '../theme';
-import { T0A, T1A, gapLabel, hatchDef, xAxis } from './scale';
+import { gapLabel, hatchDef, xAxis } from './scale';
 
 export function CompareChart({
   width,
@@ -26,6 +26,7 @@ export function CompareChart({
 }) {
   const store = useStore(),
     archive = store.archive;
+  const { chartStart: T0A, chartEnd: T1A } = archive;
   const [hover, setHover] = useState<number | null>(null);
   const W = width,
     H = 380,
@@ -64,6 +65,7 @@ export function CompareChart({
   k.push(<rect key="span" x={xa} y={T - 8} width={Math.max(0, xb - xa)} height={H - Bm - T + 8} fill="#EFEBE2" />);
   const band: ReactElement[] = [];
   series.forEach((r, i) => {
+    if (r.hi == null && r.lo == null) return; // No printed range: no band.
     const t = toT(r.date),
       tp = i ? toT(series[i - 1].date) : t - 0.6,
       tn = i < series.length - 1 ? toT(series[i + 1].date) : t + 0.6;
@@ -282,6 +284,7 @@ export function CompareChart({
           {fmtR(hr) + ' ' + hr.unit + (hr.flag ? '  ' + hr.flag : '')}
         </div>
         <div style={{ color: C.ink2 }}>{'Range on report: ' + refText(hr)}</div>
+        {hr.userEntered && <div style={{ color: C.ink2 }}>{USER_ENTERED}</div>}
         <div style={{ color: C.ink3 }}>{'Click to open the report'}</div>
       </div>
     );

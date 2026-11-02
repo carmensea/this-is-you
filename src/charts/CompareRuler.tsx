@@ -5,7 +5,7 @@ import { fLong, fShort, fromT, toT } from '../domain/dates';
 import type { ISODate } from '../domain/types';
 import { useStore } from '../state/useStore';
 import { C, MONO, SANS, SERIF } from '../theme';
-import { T0A, T1A, rulerStep, hatchDef } from './scale';
+import { rulerStep, hatchDef } from './scale';
 
 export function CompareRuler({
   width,
@@ -22,6 +22,7 @@ export function CompareRuler({
 }) {
   const store = useStore(),
     archive = store.archive;
+  const { chartStart: T0A, chartEnd: T1A } = archive;
   const dragKey = useRef<SnapKey | null>(null);
   const W = width,
     L = 104,

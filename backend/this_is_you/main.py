@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import sessionmaker
 
 from .api.documents import router as documents_router
+from .api.observations import router as observations_router
 from .config import Settings, load_settings, validate
 from .db import make_engine, migrate
 from .extraction.queue import ExtractionQueue
@@ -35,6 +36,7 @@ def create_app(settings: Settings) -> FastAPI:
         app.state.extraction.enqueue(document_id)
     app.add_middleware(LocalOnlyMiddleware)
     app.include_router(documents_router)
+    app.include_router(observations_router)
 
     @app.exception_handler(UploadRejected)
     async def rejected(_request: Request, exc: UploadRejected) -> JSONResponse:

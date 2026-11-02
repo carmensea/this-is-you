@@ -115,3 +115,50 @@ CONFLICTING_DATES = ["Visit Note", "Date of Service: 2021-01-05", "Some fictiona
 ONLY_BIRTH_DATE = ["Letter from a fictional office about nothing in particular", "DOB: 1971-02-14", "This page has plenty of text but says little."]
 UNCLEAR = ["Dear Avery,", "Here is a fictional letter that mentions nothing a rule can recognize.", "Kind regards"]
 FUTURE_DATE = ["Visit Note", "Date of Service: 2199-01-01", "Fictional text long enough to count as readable."]
+
+
+# ---- Laboratory report layouts. Every name and value is invented.
+def columns_pdf(rows: list[list[tuple[int, str]]], header: list[str] | None = None) -> bytes:
+    """Text placed at x positions, as real table PDFs do: each cell is drawn separately."""
+    objects: list[bytes] = [b"", b""]
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    ops = b"BT /F1 10 Tf ET "
+    y = 760
+    for line in header or []:
+        ops += b"BT /F1 10 Tf 40 %d Td (%s) Tj ET " % (y, _escape(line))
+        y -= 16
+    for row in rows:
+        for x, text in row:
+            ops += b"BT /F1 10 Tf %d %d Td (%s) Tj ET " % (x, y, _escape(text))
+        y -= 16
+    objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(ops), ops))
+    objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 3 0 R >> >> >>")
+    objects[0] = b"<< /Type /Catalog /Pages 2 0 R >>"
+    objects[1] = b"<< /Type /Pages /Kids [5 0 R] /Count 1 >>"
+    return _assemble(objects, 1)
+
+
+CBC_VALUE_UNIT_RANGE = [
+    "Northwood Diagnostics Laboratory", "LABORATORY REPORT", "Patient: Avery Testperson", "DOB: 02/14/1971", "Collected: 03/28/2024", "Reported: 03/30/2024",
+    "Test Result Units Reference Range",
+    "WBC 6.2 x10E3/uL 3.4-10.8", "RBC 4.81 x10E6/uL 4.14-5.80", "Hemoglobin 14.20 g/dL 13.0-17.7", "Hematocrit 43.1 % 37.5-51.0",
+    "MCV 89 fL 79-97", "MCH 29.5 pg 26.6-33.0", "Platelets 410 H x10E3/uL 150-400",
+]
+CMP_RANGE_THEN_UNIT = [
+    "Harbor Clinical Labs", "Comprehensive Metabolic Panel", "Date Collected: 2023-07-09", "Report Date: 2023-07-11",
+    "Glucose 101 H 65-99 mg/dL", "BUN 15 6-24 mg/dL", "Creatinine 1.02 0.76-1.27 mg/dL", "eGFR 92 >59 mL/min/1.73m2",
+    "Sodium 140 134-144 mmol/L", "Potassium 4.4 3.5-5.2 mmol/L", "Chloride 102 96-106 mmol/L", "Carbon Dioxide 24 18-29 mmol/L",
+    "Calcium 9.5 8.6-10.2 mg/dL", "Total Protein 7.1 6.0-8.5 g/dL", "Albumin 4.5 3.5-5.5 g/dL", "Bilirubin, Total 0.6 0.0-1.2 mg/dL",
+    "Alkaline Phosphatase 70 39-117 IU/L", "AST (SGOT) 24 0-40 IU/L", "ALT (SGPT) 29 0-44 IU/L",
+]
+LIPID_BOUNDS = [
+    "Lakeside Medical Laboratory", "Lipid Panel", "Specimen Collected: January 5, 2022", "Resulted: January 6, 2022",
+    "Total Cholesterol 198 mg/dL <200", "Triglycerides 142 mg/dL <150", "HDL Cholesterol 52 mg/dL >39", "LDL Cholesterol 118 H mg/dL <100",
+]
+THYROID_MIXED = ["Cedar Reference Lab", "Thyroid Function", "Collection Date: 09/28/2023", "TSH 2.310 uIU/mL 0.450-4.500", "T4, Free 1.21 ng/dL 0.82-1.77", "Free T3 3.1 pg/mL 2.0-4.4"]
+NO_COLLECTION_DATE = ["Fictional Lab", "Laboratory Report", "Hemoglobin 14.2 g/dL 13.0-17.7", "Glucose 90 mg/dL 65-99"]
+TWO_COLLECTIONS = ["Fictional Lab", "Laboratory Report", "Collected: 2021-01-05", "Hemoglobin 14.2 g/dL 13.0-17.7", "Collected: 2022-02-06", "Hemoglobin 13.9 g/dL 13.0-17.7"]
+MISSING_UNIT = ["Laboratory Report", "Collected: 2021-01-05", "Glucose 90 65-99", "Hemoglobin 14.2"]
+AMBIGUOUS_ROWS = ["Laboratory Report", "Collected: 03/11/2020", "TSH <0.01 mIU/L 0.45-4.50", "Hemoglobin 14,2 g/dL 13.0-17.7", "Glucose 91 88 mg/dL 65-99", "Sodium 140 ng/dL 134-144"]
+NOT_RESULTS = ["Page 1 of 2", "Phone 555-123-4567", "DOB: 02/14/1971", "Patient ID 12345", "Suite 100", "Age 53", "Account 88 mg/dL", "Order 12 13-14 mg/dL", "We looked at 3 things today."]
+UNKNOWN_TEST = ["Laboratory Report", "Collected: 2021-01-05", "Fictional Marker Alpha 12 ng/mL 5-20"]

@@ -6,11 +6,12 @@ import type { ISODate } from '../domain/types';
 import { TYPE_LABEL } from '../domain/vocabulary';
 import { useStore } from '../state/useStore';
 import { C, MONO, SANS, SERIF } from '../theme';
-import { T0A, T1A, rulerStep, hatchDef } from './scale';
+import { rulerStep, hatchDef } from './scale';
 
 export function Timeline({ width, cur }: { width: number; cur: ISODate }) {
   const store = useStore(),
     archive = store.archive;
+  const { chartStart: T0A, chartEnd: T1A } = archive;
   const [hover, setHover] = useState<ISODate | null>(null),
     drag = useRef(false);
   const onKey = (e: KeyboardEvent) => {
@@ -66,7 +67,9 @@ export function Timeline({ width, cur }: { width: number; cur: ISODate }) {
     diagnosis: 200,
   };
   const medTop = 214,
-    wY = medTop + archive.medications.length * 7 + 12;
+    // Room for at least a few rows, so the lane labels stay apart with few or no medications.
+    medRows = Math.max(archive.medications.length, 3),
+    wY = medTop + medRows * 7 + 12;
   k.push(<defs key="d">{hatchDef('tl-hatch')}</defs>);
   const step = rulerStep(pxY);
   for (let y = T0; y < T1; y++) {
@@ -120,7 +123,7 @@ export function Timeline({ width, cur }: { width: number; cur: ISODate }) {
     ] as [string, number][]
   ).forEach(([t, y]) => {
     k.push(laneLabel(t, y));
-    const sy = t === 'Medications' ? medTop + archive.medications.length * 7 + 1 : y + 10;
+    const sy = t === 'Medications' ? medTop + medRows * 7 + 1 : y + 10;
     k.push(<line key={'s' + t} x1={L} x2={W - R} y1={sy} y2={sy} stroke={C.rule2} />);
   });
   const counts: Record<string, number> = {};
@@ -263,10 +266,7 @@ export function Timeline({ width, cur }: { width: number; cur: ISODate }) {
         />,
       ),
     );
-  [
-    ['2019-01-15', '2022-06-01'],
-    ['2022-11-21', '2026-10-30'],
-  ].forEach(([a, b], i) =>
+  archive.scaleSpans.forEach(([a, b], i) =>
     k.push(
       <rect key={'ws' + i} x={x(toT(a))} y={wY - 2} width={x(toT(b)) - x(toT(a))} height={4} fill={C.ink3}>
         <title>{'Smart scale readings, ' + fMY(a) + ' to ' + fMY(b)}</title>
@@ -315,8 +315,8 @@ export function Timeline({ width, cur }: { width: number; cur: ISODate }) {
       tabIndex={0}
       role="slider"
       aria-label="Snapshot date. Use arrow keys to move by month, Shift for year, Page Up and Page Down for events."
-      aria-valuemin={2009}
-      aria-valuemax={2026}
+      aria-valuemin={archive.firstYear}
+      aria-valuemax={archive.lastYear}
       aria-valuenow={Math.floor(ct)}
       aria-valuetext={fLong(cur)}
       onKeyDown={onKey}

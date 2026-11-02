@@ -1,8 +1,26 @@
 // Talks to the local FastAPI service, and only to it. All requests are same-origin.
 import { fShort } from '../domain/dates';
 import { fmtSize } from '../domain/format';
-import type { Archive, ArchiveDocument, DocumentCategory, DocumentReview, DocumentStatus, ExtractionStatus, MetadataFieldKey, MetadataFieldState, MetadataProposal } from '../domain/types';
-import { ArchiveRequestError, type ArchiveApi, type DocumentsBackend, type FieldDecision, type UploadResult } from './archiveApi';
+import { buildClinicalRecords } from './observationRecords';
+import type {
+  Archive,
+  ArchiveDocument,
+  DocumentCategory,
+  DocumentReview,
+  DocumentStatus,
+  ExtractionStatus,
+  MetadataFieldKey,
+  MetadataFieldState,
+  MetadataProposal,
+  LabObservation,
+} from '../domain/types';
+import {
+  ArchiveRequestError,
+  type ArchiveApi,
+  type DocumentsBackend,
+  type FieldDecision,
+  type UploadResult,
+} from './archiveApi';
 
 const CLIENT_HEADER = 'X-This-Is-You-Client';
 
@@ -127,6 +145,7 @@ export function toArchiveDocument(dto: DocumentDto): ArchiveDocument {
       truncated: dto.truncated,
       fields,
       possibleDuplicates: dto.possible_duplicates,
+      observations: [],
     },
   };
 }
@@ -159,6 +178,15 @@ export function emptyPersonalArchive(today: string): Archive {
     recentImports: [],
     knownLimits: [],
     sampleBatch: [],
+    chartStart: +today.slice(0, 4),
+    chartEnd: +today.slice(0, 4) + 1,
+    firstYear: +today.slice(0, 4),
+    lastYear: +today.slice(0, 4),
+    drawDocumented: [],
+    drawDocuments: [],
+    unplotted: [],
+    observations: [],
+    testNames: [],
   };
 }
 
@@ -168,10 +196,13 @@ async function getJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export const listObservations = async () =>
+  (await getJson<{ observations: LabObservation[] }>('/api/observations')).observations;
+
 export const listDocuments = async () =>
   (await getJson<{ documents: DocumentDto[] }>('/api/documents')).documents.map(toArchiveDocument);
 
-async function send(url: string, body?: unknown): Promise<ArchiveDocument> {
+async function post<T>(url: string, body?: unknown): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {
@@ -184,8 +215,10 @@ async function send(url: string, body?: unknown): Promise<ArchiveDocument> {
   }
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new ArchiveRequestError(data?.message ?? 'This could not be saved.', data?.code ?? 'error');
-  return toArchiveDocument(data as DocumentDto);
+  return data as T;
 }
+
+const send = async (url: string, body?: unknown) => toArchiveDocument(await post<DocumentDto>(url, body));
 
 function upload(file: File, onProgress: (fraction: number) => void): Promise<UploadResult> {
   return new Promise((resolve) => {
@@ -231,9 +264,23 @@ export async function connectLocalArchive(): Promise<{ api: ArchiveApi; backend:
     decide: (id, field, decision: FieldDecision) => send(`/api/documents/${id}/metadata/${field}`, decision),
     setReview: (id, complete) => send(`/api/documents/${id}/review`, { complete }),
     readAgain: (id) => send(`/api/documents/${id}/extract`),
+    listObservations,
+    correctObservation: (id, fields) => post<LabObservation>(`/api/observations/${id}/correct`, { fields }),
+    setObservationStatus: (id, action) => post<LabObservation>(`/api/observations/${id}/${action}`),
+    verifyObservations: (ids) => post('/api/observations/verify', { ids }),
+    createObservation: (fields, documentId, verify) =>
+      post<LabObservation>('/api/observations', { fields, document_id: documentId, verify }),
   };
   const api: ArchiveApi = {
-    loadArchive: async () => withDocuments(emptyPersonalArchive(localDate(new Date())), await listDocuments()),
+    loadArchive: async () => {
+      const [documents, observations, tests] = await Promise.all([
+        listDocuments(),
+        listObservations(),
+        getJson<{ name: string }[]>('/api/lab-tests'),
+      ]);
+      const base = { ...emptyPersonalArchive(localDate(new Date())), testNames: tests.map((t) => t.name) };
+      return buildPersonalArchive(base, documents, observations, base.today);
+    },
   };
   return { api, backend };
 }
@@ -243,3 +290,23 @@ export function withDocuments(archive: Archive, documents: ArchiveDocument[]): A
 }
 
 export const todayLocal = () => localDate(new Date());
+
+const importDay = (iso: string) => localDate(new Date(iso));
+
+/** One archive built from documents and results, with each result attached to its document. */
+export function buildPersonalArchive(
+  base: Archive,
+  documents: ArchiveDocument[],
+  observations: LabObservation[],
+  today: string,
+): Archive {
+  const withResults = documents.map((d) =>
+    d.review ? { ...d, review: { ...d.review, observations: observations.filter((o) => o.document_id === d.id) } } : d,
+  );
+  return {
+    ...withDocuments(base, withResults),
+    ...buildClinicalRecords(observations, withResults, today, importDay),
+    observations,
+    today,
+  };
+}

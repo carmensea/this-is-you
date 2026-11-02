@@ -29,6 +29,13 @@ def confirm(client, doc, field):
 FIELDS = ["document_type", "service_date", "provider", "report_title"]
 
 
+def resolve_measurements(client, doc):
+    """Metadata review also waits on any measurements the document contains."""
+    for o in client.get("/api/observations").json()["observations"]:
+        if o["document_id"] == doc["id"]:
+            client.post(f"/api/observations/{o['id']}/reject", json={}, headers=CLIENT_HEADERS)
+
+
 def test_upload_returns_before_reading_and_starts_unverified(client):
     doc = imported(client, pdfs.text_pdf(pdfs.LAB_REPORT))
     assert doc["extraction_status"] == "extracted"
@@ -45,7 +52,7 @@ def test_inferred_values_are_never_reported_as_the_value(client):
         assert entry["value"] is None
         assert entry["decided_at"] is None
         assert entry["proposal"]["value"]
-        assert entry["proposal"]["method"] == "rules-v1"
+        assert entry["proposal"]["method"] == "rules-v2"
 
 
 def test_even_a_high_confidence_proposal_stays_unverified(client):
@@ -92,6 +99,7 @@ def test_not_stated_is_a_decision_but_not_verification(client):
     doc = imported(client, pdfs.text_pdf(pdfs.LAB_REPORT))
     for field in FIELDS[:-1]:
         confirm(client, doc, field)
+    resolve_measurements(client, doc)
     result = decide(client, doc, "report_title", action="not_stated").json()
     assert result["metadata"]["report_title"]["state"] == "not_stated"
     assert result["metadata"]["report_title"]["value"] is None
@@ -107,6 +115,7 @@ def test_review_cannot_complete_until_every_detail_is_decided(client):
     assert response.status_code == 409 and response.json()["code"] == "undecided_fields"
     for field in FIELDS:
         confirm(client, doc, field)
+    resolve_measurements(client, doc)
     done = client.post(url, json={"complete": True}, headers=CLIENT_HEADERS).json()
     assert done["review_status"] == "completed" and done["verification_status"] == "verified"
 
@@ -115,6 +124,7 @@ def test_changing_a_detail_reopens_a_finished_review(client):
     doc = imported(client, pdfs.text_pdf(pdfs.LAB_REPORT))
     for field in FIELDS:
         confirm(client, doc, field)
+    resolve_measurements(client, doc)
     client.post(f"/api/documents/{doc['id']}/review", json={"complete": True}, headers=CLIENT_HEADERS)
     result = decide(client, doc, "provider", action="corrected", value="A Different Fictional Lab").json()
     assert result["review_status"] == "in_progress"

@@ -4,7 +4,8 @@
 export type ISODate = string;
 
 export type LabCode = 'H' | 'N';
-export type Flag = '' | 'H' | 'L';
+/** As the laboratory printed it, shortened only for H and L. Never worked out from a range. */
+export type Flag = string;
 export type SnapshotMode = 'known' | 'now';
 
 export interface LabResult {
@@ -13,15 +14,83 @@ export interface LabResult {
   date: ISODate;
   /** When the result entered the record. "As known then" filters on this. */
   documented: ISODate;
-  lab: LabCode;
+  /** Key into Archive.labs. */
+  lab: string;
   value: number;
   lo: number | null;
   hi: number | null;
   unit: string;
   dp: number;
   flag: Flag;
-  /** Source document this value was extracted from. */
+  /** Source document this value was extracted from. Empty when entered by hand with no document. */
   documentId: string;
+  /** Exactly as printed, when it comes from a real report: "14.20", not 14.2. */
+  displayValue?: string;
+  referenceText?: string | null;
+  reportedName?: string;
+  observationId?: string;
+  /** A person typed this in. It never came from a laboratory report, whatever it is linked to. */
+  userEntered?: boolean;
+  /** The date printed on the report. Null when none was printed. Absent in the demo, which uses `documented`. */
+  reportedOn?: ISODate | null;
+}
+
+/** A verified result that cannot be drawn: it has no collection date, or no exact number. */
+export interface UnplottedResult {
+  key: string;
+  id: string;
+  name: string;
+  value: string;
+  unit: string;
+  date: ISODate | null;
+  reason: string;
+  documentId: string | null;
+  userEntered: boolean;
+}
+
+export interface ObservationRevision {
+  action: string;
+  values: Record<string, unknown>;
+  occurred_at: string;
+}
+
+/** One laboratory result as the archive stores it, with every date kept apart. */
+export interface LabObservation {
+  id: string;
+  document_id: string | null;
+  origin: 'extracted' | 'manual';
+  extraction_status: string;
+  verification_status: 'proposed' | 'verified' | 'rejected';
+  confidence: 'high' | 'medium' | 'low' | null;
+  reported_name: string;
+  test_code: string | null;
+  test_name: string | null;
+  test_short: string | null;
+  category: string;
+  compare_group: string | null;
+  value_text: string;
+  value_number: number | null;
+  unit: string | null;
+  display_unit: string | null;
+  normalized_value: number | null;
+  normalized_unit: string | null;
+  reference_text: string | null;
+  reference_low: number | null;
+  reference_high: number | null;
+  flag: string | null;
+  lab_name: string | null;
+  collected_on: ISODate | null;
+  reported_on: ISODate | null;
+  documented_on: ISODate | null;
+  imported_at: string;
+  source_page: number | null;
+  source_line: number | null;
+  source_text: string | null;
+  issues: string[];
+  edited: boolean;
+  original: Record<string, unknown>;
+  possible_duplicates: string[];
+  revisions: ObservationRevision[];
 }
 
 export interface MethodChange {
@@ -45,6 +114,8 @@ export interface Marker {
   method?: MethodChange;
   panel: string;
   results: LabResult[];
+  /** Verified results of this test that cannot be drawn. */
+  unplotted?: UnplottedResult[];
 }
 
 export interface MarkerCategory {
@@ -140,7 +211,8 @@ export interface ArchiveDocument {
 }
 
 export type MetadataFieldKey = 'document_type' | 'service_date' | 'provider' | 'report_title';
-export type ExtractionStatus = 'pending' | 'running' | 'extracted' | 'partial' | 'image_only' | 'encrypted' | 'no_text' | 'failed' | 'too_complex';
+export type ExtractionStatus =
+  'pending' | 'running' | 'extracted' | 'partial' | 'image_only' | 'encrypted' | 'no_text' | 'failed' | 'too_complex';
 
 export interface MetadataProposal {
   id: number;
@@ -170,6 +242,7 @@ export interface DocumentReview {
   truncated: boolean;
   fields: Record<MetadataFieldKey, MetadataFieldState>;
   possibleDuplicates: string[];
+  observations: LabObservation[];
 }
 
 export interface WeightReading {
@@ -234,10 +307,19 @@ export interface Archive {
   start: ISODate;
   today: ISODate;
   born: ISODate;
-  labs: Record<LabCode, string>;
+  /** First and last years on every chart's axis, and the years a person can jump between. */
+  chartStart: number;
+  chartEnd: number;
+  firstYear: number;
+  lastYear: number;
+  labs: Record<string, string>;
   /** Clinician responsible for records from each source. */
   whoBySource: Record<string, string>;
-  draws: [ISODate, LabCode][];
+  draws: [ISODate, string][];
+  /** When each draw's results entered the record. */
+  drawDocumented: ISODate[];
+  /** The source document of each draw. Null when entered by hand. */
+  drawDocuments: (string | null)[];
   categories: MarkerCategory[];
   markers: Marker[];
   overviewMarkers: Marker[];
@@ -258,4 +340,10 @@ export interface Archive {
   recentImports: ImportRecord[];
   knownLimits: { title: string; detail: string }[];
   sampleBatch: ImportFile[];
+  /** Verified results that cannot be drawn. */
+  unplotted: UnplottedResult[];
+  /** Every laboratory observation, whatever its status. Only a real archive has these. */
+  observations: LabObservation[];
+  /** Names of known tests, offered when entering a result. */
+  testNames: string[];
 }

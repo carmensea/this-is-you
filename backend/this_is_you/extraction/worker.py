@@ -65,9 +65,10 @@ def _has_image(page) -> bool:
 def read_pdf(path: str, limits: dict, today: date) -> dict:
     from pypdf import PdfReader
 
+    from .lab_rows import parse_lab_rows
     from .rules import propose_all
 
-    summary: dict = {"status": "failed", "page_count": None, "pages_read": 0, "pages_with_text": 0, "pages_failed": 0, "truncated": False, "text_sha256": None, "proposals": []}
+    summary: dict = {"status": "failed", "page_count": None, "pages_read": 0, "pages_with_text": 0, "pages_failed": 0, "truncated": False, "text_sha256": None, "proposals": [], "lab_rows": []}
     try:
         reader = PdfReader(path, strict=False)
         if reader.is_encrypted:
@@ -115,6 +116,15 @@ def read_pdf(path: str, limits: dict, today: date) -> dict:
     except Exception:
         embedded = None
     summary["proposals"] = [p.as_dict() for p in propose_all(pages, embedded if isinstance(embedded, str) else None, today)]
+    rows = parse_lab_rows(pages, today)
+    if not rows:
+        # Tables often come out as separate lines in the default mode. Layout mode keeps columns together.
+        try:
+            laid_out = [(number, reader.pages[number - 1].extract_text(extraction_mode="layout") or "") for number, _ in pages]
+            rows = parse_lab_rows(laid_out, today)
+        except Exception:
+            rows = []
+    summary["lab_rows"] = [r.as_dict() for r in rows]
     return summary
 
 

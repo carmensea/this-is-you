@@ -5,7 +5,6 @@ import { GLYPH, HCATS, TYPE_LABEL, evNote, grpOf } from '../domain/vocabulary';
 import { C } from '../theme';
 import type { AppStore } from '../state/store';
 import type { HealthEvent, ISODate } from '../domain/types';
-import { T0A, T1A } from '../charts/scale';
 
 function eventRow(store: AppStore, e: HealthEvent) {
   const archive = store.archive,
@@ -108,6 +107,7 @@ function eventRow(store: AppStore, e: HealthEvent) {
     hasResults: results.length > 0,
     results,
     resultsTitle: plural(results.length, 'result') + ' from this draw',
+    hasDoc: !!e.documentId,
     onDoc: () => store.openEventDocument(e),
     onSnap: () => store.setCur(mode === 'known' ? e.documented : e.date),
     isLab: e.type === 'lab',
@@ -182,10 +182,11 @@ export function historyVM(store: AppStore) {
   if (!snapDone && sorted.length) rows.push(snapRow());
   const sources = [...new Set(archive.events.map((e) => e.source))].sort();
   const radio = (sel: boolean) => ({ box: sel ? C.ink : 'transparent', checked: !!sel, weight: sel ? 600 : 400 });
+  const { chartStart: T0A, chartEnd: T1A } = archive;
   const tp = (d: ISODate) => ((toT(d) - T0A) / (T1A - T0A)) * 100;
   const snapL = tp(cur).toFixed(2);
   const step = (key: 'hxFrom' | 'hxTo', d: number) => () =>
-    store.setState((st) => ({ [key]: Math.max(2009, Math.min(2026, st[key] + d)) }));
+    store.setState((st) => ({ [key]: Math.max(archive.firstYear, Math.min(archive.lastYear, st[key] + d)) }));
   const seg = (on2: boolean) => ({ bg: on2 ? C.ink : C.paper, fg: on2 ? C.paper : C.ink, pressed: !!on2 });
   return {
     hxCountText:
@@ -259,7 +260,14 @@ export function historyVM(store: AppStore) {
     hxAfterLabel:
       mode === 'known' ? 'Include events documented after the snapshot' : 'Include events after the snapshot',
     hxReset: () =>
-      store.setState({ hxTypes: {}, hxSource: 'all', hxFrom: 2009, hxTo: 2026, hxQuery: '', hxShowAfter: true }),
+      store.setState({
+        hxTypes: {},
+        hxSource: 'all',
+        hxFrom: archive.firstYear,
+        hxTo: archive.lastYear,
+        hxQuery: '',
+        hxShowAfter: true,
+      }),
     hxExpandAll: () => {
       const o: Record<string, boolean> = {};
       list.forEach((e) => {
@@ -302,7 +310,7 @@ export function historyVM(store: AppStore) {
         nameWeight: act ? 600 : 500,
       };
     }),
-    treatTicks: [2009, 2012, 2015, 2018, 2021, 2024].map((yy) => ({
+    treatTicks: Array.from({ length: Math.ceil((T1A - T0A) / 3) }, (_, i) => T0A + i * 3).map((yy) => ({
       label: String(yy),
       left: tp(yy + '-01-01').toFixed(2),
     })),

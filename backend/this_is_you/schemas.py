@@ -4,7 +4,8 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from .metadata import FIELDS, current_decisions, current_proposals
-from .models import Document, MetadataDecision, MetadataProposal
+from .lab_catalog import BY_CODE, canonical_unit
+from .models import Document, MetadataDecision, MetadataProposal, Observation, RevisionAction
 
 
 class ProposalOut(BaseModel):
@@ -69,6 +70,78 @@ class DocumentOut(BaseModel):
             pages_with_text=run.pages_with_text if run else 0, truncated=run.truncated if run else False, metadata=fields,
             possible_duplicates=(duplicates or {}).get(d.id, []),
         )
+
+
+class RevisionOut(BaseModel):
+    action: str
+    values: dict
+    occurred_at: str
+
+
+class ObservationOut(BaseModel):
+    id: str
+    document_id: str | None
+    origin: str
+    extraction_status: str
+    verification_status: str
+    confidence: str | None
+    reported_name: str
+    test_code: str | None
+    code_system: str | None
+    test_name: str | None
+    test_short: str | None
+    category: str
+    compare_group: str | None
+    value_text: str
+    value_number: float | None
+    unit: str | None
+    display_unit: str | None
+    normalized_value: float | None
+    normalized_unit: str | None
+    reference_text: str | None
+    reference_low: float | None
+    reference_high: float | None
+    flag: str | None
+    lab_name: str | None
+    collected_on: str | None
+    reported_on: str | None
+    documented_on: str | None
+    imported_at: str
+    source_page: int | None
+    source_line: int | None
+    source_text: str | None
+    issues: list[str]
+    edited: bool
+    original: dict
+    possible_duplicates: list[str]
+    revisions: list[RevisionOut]
+
+    @classmethod
+    def of(cls, o: Observation, duplicates: dict[str, list[str]] | None = None) -> "ObservationOut":
+        test = BY_CODE.get(o.test_code or "")
+        return cls(
+            id=o.id, document_id=o.document_id, origin=o.origin.value, extraction_status=o.extraction_status.value, verification_status=o.verification_status.value,
+            confidence=o.confidence.value if o.confidence else None, reported_name=o.reported_name, test_code=o.test_code, code_system=o.code_system,
+            test_name=test.name if test else None, test_short=test.short if test else None, category=test.category if test else "other", compare_group=test.compare_group if test else None,
+            value_text=o.value_text, value_number=o.value_number, unit=o.unit, display_unit=canonical_unit(o.unit), normalized_value=o.normalized_value, normalized_unit=o.normalized_unit,
+            reference_text=o.reference_text, reference_low=o.reference_low, reference_high=o.reference_high, flag=o.flag, lab_name=o.lab_name,
+            collected_on=o.collected_on, reported_on=o.reported_on, documented_on=o.documented_on, imported_at=o.imported_at,
+            source_page=o.source_page, source_line=o.source_line, source_text=o.source_text, issues=o.issues,
+            edited=any(r.action is RevisionAction.CORRECTED for r in o.revisions), original=o.revisions[0].values if o.revisions else {},
+            possible_duplicates=(duplicates or {}).get(o.id, []),
+            revisions=[RevisionOut(action=r.action.value, values=r.values, occurred_at=r.occurred_at) for r in o.revisions],
+        )
+
+
+class ObservationList(BaseModel):
+    observations: list[ObservationOut]
+
+
+class LabTestOut(BaseModel):
+    code: str
+    name: str
+    short: str
+    unit: str
 
 
 class ImportEventOut(BaseModel):

@@ -8,18 +8,14 @@ import { ImportScreen } from './screens/ImportScreen';
 import { OverviewScreen } from './screens/OverviewScreen';
 import { ReviewScreen } from './screens/ReviewScreen';
 import { useStore } from './state/useStore';
-import { VIEWS, type View } from './state/store';
+import { type View } from './state/store';
+import { viewFromHash } from './services/archiveMode';
 import { NoRecordsYet } from './screens/NoRecordsYet';
 import { C } from './theme';
 import { shellVM } from './viewmodels/shell';
 
-/** These screens show extracted records, and a real archive has none yet. */
+/** These screens show verified results, which a real archive may not have yet. */
 const NEEDS_RECORDS: View[] = ['overview', 'biomarkers', 'history', 'compare'];
-
-const viewFromHash = (): View | null => {
-  const h = window.location.hash.replace(/^#\/?/, '') as View;
-  return VIEWS.includes(h) ? h : null;
-};
 
 export function App() {
   const store = useStore();
@@ -42,19 +38,21 @@ export function App() {
 
   const v = shellVM(store);
   const isDemo = store.archive.kind === 'demo';
+  const hasRecords = isDemo || store.archive.markers.length > 0;
+  const blocked = !hasRecords && NEEDS_RECORDS.includes(view);
   return (
     <div style={{ minHeight: '100vh', background: C.paper }}>
       <Header v={v} />
       {isDemo && <DemoBanner />}
       {notice && <Notice v={v} />}
-      {view !== 'overview' && (isDemo || !NEEDS_RECORDS.includes(view)) && <SnapshotBar v={v} />}
-      {!isDemo && NEEDS_RECORDS.includes(view) && <NoRecordsYet />}
-      {isDemo && view === 'overview' && <OverviewScreen />}
-      {isDemo && view === 'biomarkers' && <BiomarkersScreen />}
-      {isDemo && view === 'history' && <HistoryScreen />}
+      {view !== 'overview' && !blocked && <SnapshotBar v={v} />}
+      {blocked && <NoRecordsYet />}
+      {!blocked && view === 'overview' && <OverviewScreen />}
+      {!blocked && view === 'biomarkers' && <BiomarkersScreen />}
+      {!blocked && view === 'history' && <HistoryScreen />}
       {view === 'documents' && <DocumentsScreen />}
       {view === 'import' && (rvDoc ? <ReviewScreen /> : <ImportScreen />)}
-      {isDemo && view === 'compare' && <CompareScreen />}
+      {!blocked && view === 'compare' && <CompareScreen />}
     </div>
   );
 }

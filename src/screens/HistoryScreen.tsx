@@ -475,12 +475,14 @@ function Events({ v }: { v: VM }) {
                     </div>
                   )}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 24px', marginTop: 16, fontSize: 13 }}>
-                    <button
-                      onClick={r.onDoc}
-                      style={{ fontSize: 13, color: C.green, borderBottom: `1px solid ${C.green}` }}
-                    >
-                      Open original document
-                    </button>
+                    {r.hasDoc && (
+                      <button
+                        onClick={r.onDoc}
+                        style={{ fontSize: 13, color: C.green, borderBottom: `1px solid ${C.green}` }}
+                      >
+                        Open original document
+                      </button>
+                    )}
                     <button onClick={r.onSnap} style={s.link13}>
                       Set snapshot to this date
                     </button>

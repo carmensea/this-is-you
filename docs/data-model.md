@@ -10,6 +10,9 @@
 | `metadata_proposals` | What a run inferred: `field`, `value`, `confidence`, `reason`, `source_page`, `source_snippet` |
 | `metadata_decisions` | What a person decided, append-only: `field`, `action`, `value`, `proposal_id`, `decided_at`. The latest row per field is current. |
 
+| `lab_observations` | One laboratory result: name, value, unit and range as printed, optional `test_code`, normalized value when safely convertible, flag, the dates `collected_on`, `reported_on`, `documented_on` and `imported_at`, source page, line and text, `origin`, `extraction_status` and `verification_status` |
+| `lab_observation_revisions` | Append-only history of a result. The first row is what was first read or entered. |
+
 A document's verified type, date, provider and title are read from `metadata_decisions`, and from nowhere else. Rereading a file adds a run and new proposals and leaves decisions alone. The full text of a document is not stored, only a hash of it and the short source lines behind each proposal.
 
 ## Rules future tables should follow
@@ -26,14 +29,13 @@ None of the tables under "Planned tables" exist yet. `extraction_runs`, `metadat
 
 | Table | Holds | FHIR resource |
 | --- | --- | --- |
-| `observations` | Measurements: weight, vital signs, device readings | `Observation` |
-| `lab_results` | Laboratory values, with their printed unit, range and flag | `Observation` (category `laboratory`) |
+| `observations` | Other measurements: weight, vital signs, device readings | `Observation` |
 | `diagnostic_reports` | Imaging and pathology reports, kept as written | `DiagnosticReport` |
 | `medications` | Medications with dated dose periods | `MedicationStatement` |
 | `conditions` | Diagnoses, with onset, documented and resolved dates | `Condition` |
 | `procedures` | Procedures and surgery | `Procedure` |
 
-`documents` itself corresponds to FHIR `DocumentReference`, and proposals with decisions correspond to `Provenance`.
+`lab_observations` corresponds to FHIR `Observation` (category `laboratory`), though its identifiers are not LOINC yet. `documents` itself corresponds to FHIR `DocumentReference`, and proposals with decisions correspond to `Provenance`.
 
 For structured imports, each planned table would also carry `fhir_resource_type`, `fhir_id` and the original resource as JSON, so an import can be repeated or checked without losing fields the app does not yet use. A FHIR bundle is stored as a document first, like any other file, and its contents are records that point back to it.
 

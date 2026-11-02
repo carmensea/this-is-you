@@ -7,6 +7,7 @@ export function OriginalFile({ title, url, height = 720 }: { title: string; url:
     <>
       <div style={{ marginTop: 8, background: '#FFFEFB', border: `1px solid ${C.rule}` }}>
         <iframe
+          loading="lazy"
           key={url}
           title={`Original file: ${title}`}
           src={url}

@@ -3,10 +3,10 @@ import { addMonths, fLong } from '../domain/dates';
 import { rangeOnly, fmtR } from '../domain/format';
 import { DCATL } from '../domain/vocabulary';
 import type { Archive, ArchiveDocument, HealthEvent, ImportFile, ImportJob, ISODate, LowConfidenceNote, MetadataFieldKey, SnapshotMode } from '../domain/types';
-import { ArchiveRequestError, type DocumentsBackend, type FieldDecision } from '../services/archiveApi';
+import { ArchiveRequestError, type DocumentsBackend, type FieldDecision, type ObservationFieldValues } from '../services/archiveApi';
 import { FIELD_LABEL, FIELD_ORDER, displayValue, isReading } from '../domain/documentReview';
 import { listOnly, simulateProcessing } from '../services/importService';
-import { todayLocal, withDocuments } from '../services/localArchiveApi';
+import { buildPersonalArchive, todayLocal } from '../services/localArchiveApi';
 import { fShort } from '../domain/dates';
 import { fmtSize, kindOf } from '../domain/format';
 
@@ -35,6 +35,8 @@ type ReviewLine = {
   flag: string;
   conf: 'low' | 'high';
   reason: string;
+  status?: string;
+  edited?: boolean;
 };
 
 export type ReviewStatus = 'pending' | 'confirmed' | 'excluded';
@@ -112,6 +114,13 @@ export interface AppState {
   rvError: string | null;
   /** The page of the original to show, when following a proposal back to its source. */
   rvSourcePage: number | null;
+  /** The add-a-measurement form on the review screen. */
+  rvAdding: boolean;
+  /** Which page of a document's original the Documents screen should show. */
+  dSource: { id: string; page: number } | null;
+  /** The add-a-result form on the Import screen. */
+  manualOpen: boolean;
+  manualEdit: string | null;
   accepted: Record<string, boolean>;
   // Compare
   cA: ISODate | null;
@@ -168,6 +177,10 @@ export const initialState: AppState = {
   rvFilter: 'all',
   rvError: null,
   rvSourcePage: null,
+  rvAdding: false,
+  dSource: null,
+  manualOpen: false,
+  manualEdit: null,
   accepted: {},
   cA: null,
   cB: null,
@@ -189,6 +202,7 @@ export class AppStore {
   private stopSim: (() => void) | null = null;
   private readingTimer: ReturnType<typeof setTimeout> | null = null;
   private uploadsSinceRefresh = false;
+  private refreshSeq = 0;
   private seq = 0;
 
   constructor(
@@ -257,8 +271,13 @@ export class AppStore {
       returnTo: v !== 'documents' ? { view: v, y: scrollY() } : this.state.returnTo,
     });
   };
-  openEventDocument = (e: HealthEvent) => this.openDocument(e.documentId);
-  openDrawDocument = (draw: number) => this.openDocument('lab-' + draw);
+  openEventDocument = (e: HealthEvent) => {
+    if (e.documentId) this.openDocument(e.documentId);
+  };
+  openDrawDocument = (draw: number) => {
+    const id = this.archive.drawDocuments[draw];
+    if (id) this.openDocument(id);
+  };
   documentStatus = (d: ArchiveDocument) => (this.state.accepted[d.id] ? ('reviewed' as const) : d.status);
 
   // Review
@@ -333,7 +352,29 @@ export class AppStore {
         edited: f.state === 'corrected',
       };
     });
-    return { lines: [] as ReviewLine[], fields };
+    const inReportOrder = [...review.observations].sort(
+      (a, b) => (a.source_page ?? Infinity) - (b.source_page ?? Infinity) || (a.source_line ?? Infinity) - (b.source_line ?? Infinity),
+    );
+    const lines: ReviewLine[] = inReportOrder.map((o) => ({
+      key: o.id,
+      mk: o.test_code ?? '',
+      ri: 0,
+      measure: o.reported_name,
+      value: o.value_text,
+      unit: o.unit ?? '',
+      ref: o.reference_text ?? '',
+      flag: o.flag ?? '',
+      conf: o.issues.length || o.confidence === 'low' ? 'low' : 'high',
+      reason: o.issues.join(' '),
+      status:
+        o.verification_status === 'verified'
+          ? 'confirmed'
+          : o.verification_status === 'rejected'
+            ? 'excluded'
+            : 'pending',
+      edited: o.edited,
+    }));
+    return { lines, fields };
   }
 
   patchReview = (id: string, grp: keyof ReviewRecord, key: string, patch: ReviewPatch) => {
@@ -351,6 +392,7 @@ export class AppStore {
       rvFilter: 'all',
       rvError: null,
       rvSourcePage: null,
+      rvAdding: false,
       ...extra,
     });
 
@@ -444,29 +486,32 @@ export class AppStore {
     return Promise.all(Array.from({ length: Math.min(MAX_PARALLEL_UPLOADS, queue.length) }, work));
   }
 
+  /** Reloads documents and results. Only the newest answer counts, so a slow reply cannot undo a newer one. */
   private async refreshDocuments(backend: DocumentsBackend) {
+    const request = ++this.refreshSeq;
     try {
-      const documents = await backend.listDocuments();
-      const today = todayLocal(),
-        previous = this.archive.today;
-      this.archive = { ...withDocuments(this.archive, documents), today };
-      // Someone looking at today keeps looking at today, even past midnight.
-      this.setState((st) => (st.cur === previous ? { cur: today } : {}));
+      const [documents, observations] = await Promise.all([backend.listDocuments(), backend.listObservations()]);
+      if (request !== this.refreshSeq) return;
+      const previous = this.archive;
+      const today = todayLocal();
+      this.archive = buildPersonalArchive(previous, documents, observations, today);
+      // Someone looking at today keeps looking at today, even past midnight. Year filters left wide open stay wide open.
+      this.setState((st) => ({
+        cur: st.cur === previous.today ? today : st.cur,
+        hxFrom: st.hxFrom === previous.firstYear ? this.archive.firstYear : st.hxFrom,
+        hxTo: st.hxTo === previous.lastYear ? this.archive.lastYear : st.hxTo,
+      }));
     } catch {
-      // The upload itself succeeded. The list catches up on the next refresh or page load.
+      // The change itself was saved. The screen catches up on the next refresh or page load.
     }
   }
 
   // Decisions on real documents. The service keeps them; this only shows what it confirms it saved.
-  private replaceDocument(document: ArchiveDocument) {
-    const documents = this.archive.documents.map((d) => (d.id === document.id ? document : d));
-    this.archive = withDocuments(this.archive, documents);
-  }
-
-  private async saving(request: (backend: DocumentsBackend) => Promise<ArchiveDocument>): Promise<boolean> {
+  private async saving(request: (backend: DocumentsBackend) => Promise<unknown>): Promise<boolean> {
     if (!this.backend) return false;
     try {
-      this.replaceDocument(await request(this.backend));
+      await request(this.backend);
+      await this.refreshDocuments(this.backend);
       this.setState({ rvError: null });
       return true;
     } catch (problem) {
@@ -492,6 +537,47 @@ export class AppStore {
   readAgain = async (id: string) => {
     if (await this.saving((backend) => backend.readAgain(id))) this.watchReading();
   };
+
+  // Laboratory results
+  setObservationStatus = (id: string, action: 'verify' | 'reject' | 'reopen') =>
+    this.saving((backend) => backend.setObservationStatus(id, action));
+  verifyObservations = (ids: string[]) => this.saving((backend) => backend.verifyObservations(ids));
+
+  private async attempt(
+    work: (backend: DocumentsBackend) => Promise<unknown>,
+    after: Partial<AppState>,
+  ): Promise<string | null> {
+    if (!this.backend) return null;
+    try {
+      await work(this.backend);
+      await this.refreshDocuments(this.backend);
+      this.setState(after);
+      return null;
+    } catch (problem) {
+      return problem instanceof ArchiveRequestError ? problem.message : 'This could not be saved.';
+    }
+  }
+
+  /** Saves a correction. Resolves to an error for the form to show, or null. */
+  correctObservation = (id: string, fields: ObservationFieldValues) =>
+    this.attempt((backend) => backend.correctObservation(id, fields), { rvEdit: null, manualEdit: null });
+
+  /** Adds a result typed in by a person, optionally linked to a document. */
+  createObservation = (fields: ObservationFieldValues, documentId: string | null, verify: boolean) =>
+    this.attempt((backend) => backend.createObservation(fields, documentId, verify), {
+      rvAdding: false,
+      manualOpen: false,
+    });
+
+  /** A person retyping their own entry is approving it, so the correction goes straight back on the charts. */
+  correctManual = (id: string, fields: ObservationFieldValues) =>
+    this.attempt(
+      async (backend) => {
+        await backend.correctObservation(id, fields);
+        await backend.setObservationStatus(id, 'verify');
+      },
+      { manualEdit: null },
+    );
 
   /** Checks back while any document is still being read. */
   watchReading = () => {

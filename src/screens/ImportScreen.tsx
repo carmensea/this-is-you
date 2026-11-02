@@ -1,5 +1,6 @@
 import { Fragment } from 'react';
 import { Footer } from '../components/controls';
+import { ObservationForm } from '../components/ObservationForm';
 import { useStore } from '../state/useStore';
 import { C, MONO, SERIF } from '../theme';
 import { s } from '../components/styles';
@@ -99,6 +100,90 @@ function CurrentBatch({ v }: { v: VM }) {
       <p style={{ fontFamily: MONO, fontSize: 11, color: C.ink3, margin: '8px 0 0' }}>
         Pipeline squares: stored, read, extracted, reviewed. Review happens in the queue below.
       </p>
+    </section>
+  );
+}
+
+function ManualResults({ v }: { v: VM }) {
+  return (
+    <section aria-label="User-entered results" style={{ marginTop: 40 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'baseline',
+          gap: '8px 24px',
+          borderBottom: `1px solid ${C.ink}`,
+          paddingBottom: 8,
+        }}
+      >
+        <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 26, margin: 0 }}>User-entered results</h2>
+        <button onClick={v.toggleManual} style={s.link13}>
+          Enter a result
+        </button>
+      </div>
+      {v.manualOpen && (
+        <div style={{ marginTop: 12 }}>
+          <ObservationForm
+            testNames={v.testNames}
+            saveLabel="Save result"
+            onSave={v.saveManual}
+            onCancel={v.toggleManual}
+          />
+        </div>
+      )}
+      {v.manualRows.map((r) => (
+        <div key={r.id} style={{ borderBottom: `1px solid ${C.rule2}` }}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '6px 18px',
+              padding: '12px 4px',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+            }}
+          >
+            <span style={{ flex: '1 1 240px', minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 14, fontWeight: 500 }}>{r.name}</span>
+              <span style={s.muted115}>{r.history}</span>
+            </span>
+            <span style={{ fontFamily: MONO, fontSize: 13 }}>{r.value}</span>
+            <span style={{ fontSize: 12.5, color: C.ink2 }}>{r.date}</span>
+            <span style={{ fontSize: 12.5, color: r.statusColor }}>{r.status}</span>
+            <span style={{ display: 'flex', gap: 12 }}>
+              <button onClick={r.onEdit} style={s.link12}>
+                Edit
+              </button>
+              {r.isRejected ? (
+                <button onClick={r.onRestore} style={s.link12}>
+                  Restore
+                </button>
+              ) : (
+                <button onClick={r.onRemove} style={s.link12}>
+                  Remove
+                </button>
+              )}
+            </span>
+          </div>
+          {r.isEditing && (
+            <ObservationForm
+              initial={r.observation}
+              testNames={v.testNames}
+              saveLabel="Save correction"
+              onSave={r.onSave}
+              onCancel={r.onCancel}
+            />
+          )}
+        </div>
+      ))}
+      {!v.manualRows.length && !v.manualOpen && (
+        <p style={{ margin: '12px 0', fontSize: 13, color: C.ink2 }}>
+          None yet. Use this when a report cannot be read, or to add a result with no document. Each one keeps its
+          editing history and stays marked as user-entered, never as coming from a laboratory report.
+        </p>
+      )}
     </section>
   );
 }
@@ -299,6 +384,7 @@ export function ImportScreen() {
       </div>
       {v.impHasBatch && <CurrentBatch v={v} />}
       <ReviewQueue v={v} />
+      {!v.isDemo && <ManualResults v={v} />}
       <Footer />
     </main>
   );

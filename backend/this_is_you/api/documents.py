@@ -42,7 +42,7 @@ def _detail(request: Request, document_id: str) -> DocumentDetail:
 MAX_JSON_BYTES = 16 * 1024
 
 
-async def _read_json(request: Request, model: type[BaseModel]):
+async def read_json(request: Request, model: type[BaseModel]):
     """Reads a small JSON body, stopping as soon as it passes the cap."""
     body = b""
     async for chunk in request.stream():
@@ -135,7 +135,7 @@ def get_content(request: Request, document_id: DocumentId, download: bool = Fals
 @router.post("/{document_id}/metadata/{field}", response_model=DocumentDetail)
 async def decide_field(request: Request, document_id: DocumentId, field: MetadataField) -> DocumentDetail:
     """Record what a person decided about one detail. The original file is not involved."""
-    body = await _read_json(request, DecisionBody)
+    body = await read_json(request, DecisionBody)
     decision = metadata.DecisionRequest(action=body.action, value=body.value, proposal_id=body.proposal_id)
     await run_in_threadpool(metadata.decide, request.app.state.sessions, document_id, field, decision)
     return await run_in_threadpool(_detail, request, document_id)
@@ -143,7 +143,7 @@ async def decide_field(request: Request, document_id: DocumentId, field: Metadat
 
 @router.post("/{document_id}/review", response_model=DocumentDetail)
 async def set_review(request: Request, document_id: DocumentId) -> DocumentDetail:
-    body = await _read_json(request, ReviewBody)
+    body = await read_json(request, ReviewBody)
     await run_in_threadpool(metadata.set_review, request.app.state.sessions, document_id, body.complete)
     return await run_in_threadpool(_detail, request, document_id)
 

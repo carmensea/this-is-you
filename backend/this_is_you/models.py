@@ -4,7 +4,7 @@ from __future__ import annotations
 import enum
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -62,6 +62,36 @@ class DecisionAction(str, enum.Enum):
     CONFIRMED = "confirmed"  # A person checked the proposal and it is right.
     CORRECTED = "corrected"  # A person replaced it.
     NOT_STATED = "not_stated"  # A person checked and the document does not say.
+
+
+class ObservationOrigin(str, enum.Enum):
+    EXTRACTED = "extracted"
+    MANUAL = "manual"
+
+
+class ObservationVerification(str, enum.Enum):
+    """Only VERIFIED observations ever reach a chart. The change takes a person's explicit approval."""
+
+    PROPOSED = "proposed"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+
+
+class ObservationExtraction(str, enum.Enum):
+    """How cleanly a row was read. Says nothing about whether it is right."""
+
+    PARSED = "parsed"
+    AMBIGUOUS = "ambiguous"
+    NOT_EXTRACTED = "not_extracted"  # Entered by a person.
+
+
+class RevisionAction(str, enum.Enum):
+    EXTRACTED = "extracted"
+    ENTERED = "entered"
+    CORRECTED = "corrected"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+    REOPENED = "reopened"
 
 
 class Confidence(str, enum.Enum):
@@ -173,3 +203,60 @@ class MetadataDecision(Base):
 
     document: Mapped[Document] = relationship(back_populates="decisions")
     proposal: Mapped[MetadataProposal | None] = relationship()
+
+
+class Observation(Base):
+    """One laboratory result. These columns hold current values; revisions hold how they got here."""
+
+    __tablename__ = "lab_observations"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid4().hex)
+    # Empty for a result typed in by hand with no document behind it.
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id"), index=True)
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("extraction_runs.id"))
+    origin: Mapped[ObservationOrigin] = mapped_column(_stored_as_value(ObservationOrigin), nullable=False)
+    extraction_status: Mapped[ObservationExtraction] = mapped_column(_stored_as_value(ObservationExtraction), nullable=False)
+    verification_status: Mapped[ObservationVerification] = mapped_column(_stored_as_value(ObservationVerification), nullable=False, default=ObservationVerification.PROPOSED, index=True)
+    confidence: Mapped[Confidence | None] = mapped_column(_stored_as_value(Confidence))
+
+    reported_name: Mapped[str] = mapped_column(String(200), nullable=False)  # Exactly as printed.
+    test_code: Mapped[str | None] = mapped_column(String(32), index=True)
+    code_system: Mapped[str | None] = mapped_column(String(32))
+    value_text: Mapped[str] = mapped_column(String(60), nullable=False)  # Exactly as printed: "14.20", "<0.5".
+    value_number: Mapped[float | None] = mapped_column(Float)  # Only when the value is one exact number.
+    unit: Mapped[str | None] = mapped_column(String(40))  # Exactly as printed. Never assumed.
+    normalized_value: Mapped[float | None] = mapped_column(Float)
+    normalized_unit: Mapped[str | None] = mapped_column(String(40))
+    reference_text: Mapped[str | None] = mapped_column(String(60))
+    reference_low: Mapped[float | None] = mapped_column(Float)
+    reference_high: Mapped[float | None] = mapped_column(Float)
+    flag: Mapped[str | None] = mapped_column(String(12))  # As the laboratory printed it. Never computed.
+    lab_name: Mapped[str | None] = mapped_column(String(255))
+
+    # Four different moments. Any of the first three may be unknown, and none stands in for another.
+    collected_on: Mapped[str | None] = mapped_column(String(10), index=True)  # When the specimen was taken.
+    reported_on: Mapped[str | None] = mapped_column(String(10))  # The date on the laboratory's report.
+    documented_on: Mapped[str | None] = mapped_column(String(10))  # When the result entered any record.
+    imported_at: Mapped[str] = mapped_column(String(32), nullable=False)  # When it reached this archive.
+
+    source_page: Mapped[int | None] = mapped_column(Integer)
+    source_line: Mapped[int | None] = mapped_column(Integer)
+    source_text: Mapped[str | None] = mapped_column(String(200))
+    issues: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+    document: Mapped[Document | None] = relationship()
+    revisions: Mapped[list["ObservationRevision"]] = relationship(back_populates="observation", order_by="ObservationRevision.id")
+
+
+class ObservationRevision(Base):
+    """Append-only. The first row is what was originally read or entered, and is never changed."""
+
+    __tablename__ = "lab_observation_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    observation_id: Mapped[str] = mapped_column(ForeignKey("lab_observations.id"), nullable=False, index=True)
+    action: Mapped[RevisionAction] = mapped_column(_stored_as_value(RevisionAction), nullable=False)
+    values: Mapped[dict] = mapped_column(JSON, nullable=False)
+    occurred_at: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    observation: Mapped[Observation] = relationship(back_populates="revisions")

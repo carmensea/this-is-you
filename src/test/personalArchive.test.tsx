@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { App } from '../App';
+import { viewFromHash } from '../services/archiveMode';
 import { ArchiveUnavailable } from '../screens/ArchiveUnavailable';
 import { ArchiveRequestError, type DocumentsBackend, type UploadResult } from '../services/archiveApi';
 import { emptyPersonalArchive, toArchiveDocument, withDocuments, type DocumentDto } from '../services/localArchiveApi';
@@ -46,6 +47,11 @@ function backendWith(result: UploadResult, documents = [toArchiveDocument(dto())
     decide: vi.fn(async () => toArchiveDocument(dto())),
     setReview: vi.fn(async () => toArchiveDocument(dto())),
     readAgain: vi.fn(async () => toArchiveDocument(dto())),
+    listObservations: vi.fn(async () => []),
+    correctObservation: vi.fn(),
+    setObservationStatus: vi.fn(),
+    verifyObservations: vi.fn(),
+    createObservation: vi.fn(),
   };
 }
 
@@ -67,13 +73,13 @@ describe('a real archive shows no fictional data', () => {
   });
   it('explains why record screens are empty instead of inventing records', () => {
     const { container } = mount({ view: 'overview' });
-    expect(container.textContent).toContain('not the results inside it');
+    expect(container.textContent).toContain('laboratory results you have verified, and there are none yet');
     expect(container.querySelectorAll('svg')).toHaveLength(0);
   });
   it('tells the truth about what import does', () => {
     const { container } = mount({ view: 'import' });
     expect(container.textContent).toContain('Nothing is sent anywhere');
-    expect(container.textContent).toContain('Test results are not extracted yet');
+    expect(container.textContent).toContain('Nothing is verified until you accept it');
     expect(container.textContent).not.toContain('simulated');
     expect(container.textContent).not.toContain('text recognition');
   });
@@ -135,6 +141,15 @@ describe('real documents on the Documents screen', () => {
 });
 
 describe('address bar', () => {
+  it('reads the screen from the address, ignoring anything unknown', () => {
+    expect(viewFromHash('#/compare')).toBe('compare');
+    expect(viewFromHash('')).toBeNull();
+    expect(viewFromHash('#/../../etc')).toBeNull();
+  });
+  it('loads a PDF only when it is scrolled into view', () => {
+    const { container } = mount();
+    expect(container.querySelector('iframe')!.getAttribute('loading')).toBe('lazy');
+  });
   it('opens the screen named in the address, so a reload stays put', () => {
     window.location.hash = '/import';
     const archive = emptyPersonalArchive('2026-11-01');

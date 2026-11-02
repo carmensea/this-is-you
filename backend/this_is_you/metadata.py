@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .documents import utc_now
 from .extraction import METHOD
 from .extraction.runner import ExtractionResult, Limits, extract
+from .observations import add_extracted_rows, unresolved_count
 from .models import (
     Confidence,
     DecisionAction,
@@ -35,6 +36,7 @@ log = logging.getLogger("this_is_you.extraction")
 
 FIELDS = list(MetadataField)
 UNFINISHED = (ExtractionStatus.PENDING, ExtractionStatus.RUNNING)
+READABLE = (ExtractionStatus.EXTRACTED, ExtractionStatus.PARTIAL)
 
 
 def conflict(code: str, message: str) -> UploadRejected:
@@ -55,7 +57,9 @@ def record_result(session: Session, document: Document, result: ExtractionResult
     for p in result.proposals:
         run.proposals.append(MetadataProposal(field=MetadataField(p["field"]), value=p["value"], confidence=Confidence(p["confidence"]), reason=p["reason"], source_page=p["page"], source_snippet=p["snippet"]))
     session.add(run)
+    session.flush()
     document.extraction_status = run.status
+    add_extracted_rows(session, document, run.id, result.lab_rows)
 
 
 def process_document(sessions: sessionmaker[Session], store: OriginalStore, limits: Limits, document_id: str) -> None:
@@ -80,6 +84,11 @@ def documents_to_resume(sessions: sessionmaker[Session]) -> list[str]:
     """After a restart: anything interrupted mid-read goes back in the queue."""
     with sessions() as session:
         session.execute(update(Document).where(Document.extraction_status == ExtractionStatus.RUNNING).values(extraction_status=ExtractionStatus.PENDING))
+        # Files read by an older version of the rules get read again, so they gain anything new it can find.
+        latest = dict(session.execute(select(ExtractionRun.document_id, ExtractionRun.method).order_by(ExtractionRun.id)).all())
+        outdated = [doc for doc, method in latest.items() if method != METHOD]
+        if outdated:
+            session.execute(update(Document).where(Document.id.in_(outdated), Document.extraction_status.in_(READABLE)).values(extraction_status=ExtractionStatus.PENDING))
         session.commit()
         return list(session.scalars(select(Document.id).where(Document.extraction_status == ExtractionStatus.PENDING)))
 
@@ -191,6 +200,9 @@ def set_review(sessions: sessionmaker[Session], document_id: str, complete: bool
             missing = [f for f in FIELDS if f not in current_decisions(document)]
             if missing:
                 raise conflict("undecided_fields", f"{len(missing)} of {len(FIELDS)} details still need a decision.")
+            waiting = unresolved_count(session, document_id)
+            if waiting:
+                raise conflict("undecided_observations", f"{waiting} measurements still need to be accepted or rejected.")
             document.review_status = ReviewStatus.COMPLETED
         else:
             document.review_status = ReviewStatus.IN_PROGRESS

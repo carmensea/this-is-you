@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { useState } from 'react';
 import { fMY, fShort, toT } from '../domain/dates';
-import { fmtV, niceTicks, refText } from '../domain/format';
+import { USER_ENTERED, fmtR, niceTicks, refText } from '../domain/format';
 import type { LabResult, Marker, ISODate } from '../domain/types';
 import { useStore } from '../state/useStore';
 import { C, MONO, SANS, SERIF } from '../theme';
@@ -46,6 +46,7 @@ export function MarkerChart({ width, m, cur, selR }: { width: number; m: Marker;
   ];
   const band: ReactElement[] = [];
   all.forEach((r, i) => {
+    if (r.hi == null && r.lo == null) return; // No printed range: no band.
     const t = toT(r.date),
       tp = i ? toT(all[i - 1].date) : t - 0.6,
       tn = i < all.length - 1 ? toT(all[i + 1].date) : t + 0.6;
@@ -192,7 +193,7 @@ export function MarkerChart({ width, m, cur, selR }: { width: number; m: Marker;
     if (selR && selR.i === r.i)
       pts.push(
         <text key="sv" x={px + 12} y={py + 4} fontFamily={MONO} fontSize={12} fontWeight={500} fill={C.ink}>
-          {fmtV(m, r.value)}
+          {fmtR(r)}
         </text>,
       );
     pts.push(
@@ -207,7 +208,7 @@ export function MarkerChart({ width, m, cur, selR }: { width: number; m: Marker;
         onMouseLeave={() => setHover(null)}
         onClick={() => store.setState({ sel: r.i })}
       >
-        <title>{fShort(r.date) + ': ' + fmtV(m, r.value) + ' ' + m.unit + (r.flag ? ', flagged ' + r.flag : '')}</title>
+        <title>{fShort(r.date) + ': ' + fmtR(r) + ' ' + m.unit + (r.flag ? ', flagged ' + r.flag : '')}</title>
       </circle>,
     );
   });
@@ -254,9 +255,10 @@ export function MarkerChart({ width, m, cur, selR }: { width: number; m: Marker;
       >
         <div style={{ fontFamily: MONO, fontSize: 11, color: C.ink2 }}>{fShort(hr.date)}</div>
         <div style={{ fontSize: 15, fontWeight: 500, margin: '2px 0' }}>
-          {fmtV(m, hr.value) + ' ' + m.unit + (hr.flag ? '  ' + hr.flag : '')}
+          {fmtR(hr) + ' ' + m.unit + (hr.flag ? '  ' + hr.flag : '')}
         </div>
         <div style={{ color: C.ink2 }}>{'Range on report: ' + refText(hr)}</div>
+        {hr.userEntered && <div style={{ color: C.ink2 }}>{USER_ENTERED}</div>}
         <div style={{ color: C.ink2 }}>{archive.labs[hr.lab]}</div>
         {!isVis(hr) ? (
           <div style={{ color: C.rust }}>{hr.date > cur ? 'Collected after snapshot' : 'Reported after snapshot'}</div>

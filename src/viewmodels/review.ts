@@ -5,12 +5,59 @@ import { DCATL, DCATS } from '../domain/vocabulary';
 import { EXTRACTION_LABEL, VERIFICATION_LABEL, displayValue } from '../domain/documentReview';
 import type { DocumentReview, MetadataFieldKey } from '../domain/types';
 import type { SegmentItem } from '../components/controls';
+import type { ObservationFields } from '../components/ObservationForm';
 import { C } from '../theme';
 import type { AppState, AppStore } from '../state/store';
 
 export type ReviewVM = NonNullable<ReturnType<typeof reviewVM>>;
 
 type Item = { status: string; conf: string; edited: boolean };
+
+function realLineStatus(real: DocumentReview, id: string): string {
+  const o = real.observations.find((x) => x.id === id);
+  if (!o) return '';
+  if (o.verification_status === 'verified')
+    return 'Accepted by you. Shown in Biomarkers if it has a collection date and an exact number.';
+  if (o.verification_status === 'rejected') return 'Rejected. Not shown anywhere; still visible in the original.';
+  return o.confidence ? `Proposed, not verified · ${o.confidence} confidence` : 'Not yet accepted';
+}
+
+function realLineEditedText(real: DocumentReview, id: string): string {
+  const o = real.observations.find((x) => x.id === id);
+  if (!o) return '';
+  const was = o.original;
+  const first = [was.reported_name, was.value_text, was.unit].filter(Boolean).join(' ');
+  return `${o.origin === 'manual' ? 'First entered' : 'First read'} as ${first}${was.collected_on ? `, collected ${fShort(String(was.collected_on))}` : ', with no collection date'}. Kept in the history.`;
+}
+
+/** What only a real measurement has: where it came from, its dates, and its form. */
+function lineExtras(store: AppStore, real: DocumentReview | undefined, id: string) {
+  const o = real?.observations.find((x) => x.id === id);
+  const when = (label: string, d: string | null | undefined) => `${label} ${d ? fShort(d) : 'unknown'}`;
+  return {
+    observation: o,
+    realEditedText: real && o?.edited ? realLineEditedText(real, id) : '',
+    dates: o
+      ? [when('Collected', o.collected_on), when('Reported', o.reported_on), when('Documented', o.documented_on)].join(
+          ' · ',
+        )
+      : '',
+    evidence: !o
+      ? ''
+      : o.source_page
+        ? `Source, page ${o.source_page}, line ${o.source_line}: "${o.source_text}"`
+        : o.origin === 'manual'
+          ? 'User-entered, not read from this document'
+          : '',
+    evidencePage: o?.source_page ?? 0,
+    onShowPage: () => store.setState({ rvSourcePage: o?.source_page ?? null }),
+    duplicateNote: o?.possible_duplicates.length
+      ? 'The same result, date and unit also appears elsewhere in the archive. Charts show it once.'
+      : '',
+    onSaveForm: (fields: ObservationFields) => store.correctObservation(id, fields),
+    onCancelForm: () => store.setState({ rvEdit: null }),
+  };
+}
 
 function rawValue(real: DocumentReview, key: MetadataFieldKey): string {
   const f = real.fields[key];
@@ -21,7 +68,7 @@ function realEditedText(real: DocumentReview, key: MetadataFieldKey): string {
   const f = real.fields[key];
   return f.proposal
     ? `Read from the document as ${displayValue(key, f.proposal.value)}. Your correction is kept beside it.`
-    : 'Entered by you. Nothing was read from the document.';
+    : 'User-entered. Nothing was read from the document.';
 }
 
 function realStatusText(real: DocumentReview, key: MetadataFieldKey): string {
@@ -73,6 +120,7 @@ export function reviewVM(store: AppStore) {
     s = store.state;
   const id = s.rvDoc;
   if (!id || !archive.documentsById[id]) return null;
+  const real = archive.documentsById[id].review;
   const d = archive.documentsById[id],
     x = store.reviewData(id),
     rs = (s.rv || {})[id] || { lines: {}, fields: {} };
@@ -99,7 +147,12 @@ export function reviewVM(store: AppStore) {
   const conf = L.filter((l) => l.status === 'confirmed').length,
     exc = L.filter((l) => l.status === 'excluded').length,
     edt = all.filter((l) => l.edited).length;
-  const highPending = L.filter((l) => l.status === 'pending' && l.conf === 'high');
+  const highPending = L.filter(
+    (l) =>
+      l.status === 'pending' &&
+      l.conf === 'high' &&
+      (!real || real.observations.find((o) => o.id === l.key)?.confidence === 'high'),
+  );
   const dr = s.rvDraft;
   const seg = (on: boolean) => ({ bg: on ? C.ink : C.paper, fg: on ? C.paper : C.ink, pressed: !!on });
   const stText = (l: Item) =>
@@ -127,7 +180,6 @@ export function reviewVM(store: AppStore) {
         : l.status !== 'pending'),
   );
   const editKey = s.rvEdit;
-  const real = d.review;
   const out = {
     rvIsReview: s.rvStage === 'review',
     rvIsConfirm: s.rvStage === 'confirm',
@@ -152,7 +204,7 @@ export function reviewVM(store: AppStore) {
         d.imported,
     rvFile: d.file + (d.pages ? ' · ' + plural(d.pages, 'page') : ''),
     rvProgress: real
-      ? `${all.length - pending} of ${all.length} details resolved · ${edt} corrected · ${VERIFICATION_LABEL[real.verification]}`
+      ? `${all.length - pending} of ${all.length} items resolved · ${edt} corrected · ${VERIFICATION_LABEL[real.verification]}`
       : all.length -
         pending +
         ' of ' +
@@ -234,8 +286,14 @@ export function reviewVM(store: AppStore) {
         sqOf(l),
       ),
     ),
+    rvNoneRecognized: !!real && !L.length,
+    rvAdding: s.rvAdding,
+    rvToggleAdd: () => store.setState((st) => ({ rvAdding: !st.rvAdding })),
+    rvAddMeasurement: (fields: ObservationFields) => store.createObservation(fields, id, false),
+    testNames: archive.testNames,
     rvLines: showL.map((l) =>
       Object.assign(
+        lineExtras(store, real, l.key),
         {
           key: l.key,
           measure: l.measure,
@@ -245,9 +303,9 @@ export function reviewVM(store: AppStore) {
           flag: l.flag,
           rowBg: s.rvLine === l.key ? '#EDE9DF' : 'transparent',
           deco: l.status === 'excluded' ? 'line-through' : 'none',
-          isLow: l.conf === 'low' && l.status === 'pending',
+          isLow: !!l.reason && (real ? l.status !== 'excluded' : l.conf === 'low' && l.status === 'pending'),
           reason: l.reason,
-          statusText: stText(l),
+          statusText: real ? realLineStatus(real, l.key) : stText(l),
           statusColor: stColor(l),
           canConfirm: l.status !== 'confirmed',
           canExclude: l.status !== 'excluded',
@@ -286,11 +344,21 @@ export function reviewVM(store: AppStore) {
           ),
           onFocus: () => store.setState({ rvLine: l.key }),
           onConfirm: () => {
+            if (real) {
+              void store.setObservationStatus(l.key, 'verify');
+              return;
+            }
             store.patchReview(id, 'lines', l.key, { status: 'confirmed' });
             store.setState({ rvLine: l.key });
           },
-          onExclude: () => store.patchReview(id, 'lines', l.key, { status: 'excluded' }),
-          onRestore: () => store.patchReview(id, 'lines', l.key, { status: 'pending' }),
+          onExclude: () =>
+            real
+              ? void store.setObservationStatus(l.key, 'reject')
+              : store.patchReview(id, 'lines', l.key, { status: 'excluded' }),
+          onRestore: () =>
+            real
+              ? void store.setObservationStatus(l.key, 'reopen')
+              : store.patchReview(id, 'lines', l.key, { status: 'pending' }),
           onEdit: () =>
             store.setState({
               rvEdit: l.key,
@@ -330,22 +398,24 @@ export function reviewVM(store: AppStore) {
       Object.assign({ label: fl, onClick: () => store.setState({ rvFilter: fk }) }, seg(filt === fk)),
     ),
     rvHasHigh: highPending.length > 0,
-    rvHighLabel: 'Confirm all ' + highPending.length + ' high-confidence values',
+    rvHighLabel: (real ? 'Accept all ' : 'Confirm all ') + highPending.length + ' high-confidence values',
     rvConfirmHigh: () =>
-      store.setState((st) => {
-        const rv = Object.assign({}, st.rv);
-        const c = Object.assign({ lines: {}, fields: {} }, rv[id]);
-        c.lines = Object.assign({}, c.lines);
-        highPending.forEach((l) => {
-          c.lines[l.key] = Object.assign({}, c.lines[l.key], { status: 'confirmed' });
-        });
-        rv[id] = c;
-        return { rv };
-      }),
+      real
+        ? void store.verifyObservations(highPending.map((l) => l.key))
+        : store.setState((st) => {
+            const rv = Object.assign({}, st.rv);
+            const c = Object.assign({ lines: {}, fields: {} }, rv[id]);
+            c.lines = Object.assign({}, c.lines);
+            highPending.forEach((l) => {
+              c.lines[l.key] = Object.assign({}, c.lines[l.key], { status: 'confirmed' });
+            });
+            rv[id] = c;
+            return { rv };
+          }),
     rvPendingText: pending
       ? plural(pending, 'item') +
         (real
-          ? ' still to resolve. Confirm, correct or mark each one as not stated.'
+          ? ' still to resolve. Accept or reject each measurement, and confirm, correct or mark each detail as not stated.'
           : ' still to resolve. Confirm, correct or exclude each one.')
       : real
         ? 'Every detail is decided, and your decisions are saved. The next step marks the review as complete.'
@@ -362,7 +432,7 @@ export function reviewVM(store: AppStore) {
     },
     rvBackToReview: () => store.setState({ rvStage: 'review' }),
     rvSumAdd: real
-      ? 'These details will be saved as reviewed, each linked to this document. Nothing is changed in the original file.'
+      ? `${plural(conf, 'measurement')} accepted and ${exc} rejected. Accepted results are linked to this document. Nothing is changed in the original file.`
       : L.length
         ? plural(conf, 'measurement') + ' will be added to the archive as reviewed, each linked to this document.'
         : 'The document details will be marked as reviewed.',
@@ -370,7 +440,9 @@ export function reviewVM(store: AppStore) {
       .filter((l) => l.edited)
       .map((l) => ({
         text: real
-          ? `${l.label}: ${realEditedText(real, l.key as MetadataFieldKey)}`
+          ? l.measure
+            ? `${l.measure}: ${realLineEditedText(real, l.key)}`
+            : `${l.label}: ${realEditedText(real, l.key as MetadataFieldKey)}`
           : (l.measure || l.label) +
             ': extracted as ' +
             l.orig.value +
@@ -386,7 +458,11 @@ export function reviewVM(store: AppStore) {
       text: l.measure + ': ' + l.orig.value + ' ' + l.orig.unit,
     })),
     rvHasExcl: exc > 0,
-    rvAcceptLabel: L.length ? 'Accept ' + plural(conf, 'value') + ' into the archive' : 'Mark document as reviewed',
+    rvAcceptLabel: real
+      ? 'Mark document as reviewed'
+      : L.length
+        ? 'Accept ' + plural(conf, 'value') + ' into the archive'
+        : 'Mark document as reviewed',
     rvAccept: () => {
       if (real) {
         void store.completeReview(id);

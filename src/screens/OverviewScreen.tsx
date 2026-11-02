@@ -39,8 +39,12 @@ function TimeMachine({ v }: { v: VM }) {
             {v.curLong}
           </h1>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', fontSize: 14, color: C.ink2 }}>
-            <span>Age {v.age}</span>
-            <span style={{ color: C.faint }}>/</span>
+            {v.hasBirthDate && (
+              <>
+                <span>Age {v.age}</span>
+                <span style={{ color: C.faint }}>/</span>
+              </>
+            )}
             <span>{v.agoText}</span>
           </div>
         </div>
@@ -724,7 +728,7 @@ export function OverviewScreen() {
         <div style={{ flex: '1 1 620px', minWidth: 0 }}>
           <SummaryOfRecords v={v} />
           <BiomarkerTrend v={v} />
-          <WeightHistory v={v} />
+          {v.hasWeight && <WeightHistory v={v} />}
         </div>
         <aside
           style={{ flex: '1 1 340px', maxWidth: 480, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 40 }}

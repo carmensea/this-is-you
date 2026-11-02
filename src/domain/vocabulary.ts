@@ -36,7 +36,10 @@ export const GLYPH: Record<EventType, { w: number; h: number; r: string; bg: str
 
 export const evNote = (e: HealthEvent) =>
   ({
-    lab: 'Results are shown exactly as printed on the laboratory report, including the reference ranges and flags the laboratory assigned.',
+    lab:
+      e.provenance.format === 'User-entered'
+        ? 'User-entered. Not read from a laboratory report.'
+        : 'Results are shown exactly as printed on the laboratory report, including the reference ranges and flags the laboratory assigned.',
     visit:
       'The clinical note for this visit is kept in the original document. The archive records that the visit took place and links to the note.',
     imaging:

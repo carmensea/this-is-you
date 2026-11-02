@@ -1,6 +1,15 @@
 import type { Click, InputChange } from './events';
 import { fLong, fMY, fShort, span } from '../domain/dates';
-import { fmtR, plural, rangeOnly, refText } from '../domain/format';
+import {
+  USER_ENTERED,
+  flagText,
+  fmtR,
+  provenanceText,
+  reportedText,
+  plural,
+  rangeOnly,
+  refText,
+} from '../domain/format';
 import { C } from '../theme';
 import type { AppState, AppStore } from '../state/store';
 import type { LabResult } from '../domain/types';
@@ -113,17 +122,47 @@ export function biomarkersVM(store: AppStore) {
         flag: r.flag,
         ref: rangeOnly(r),
         lab: archive.labs[r.lab],
-        reported: fShort(r.documented),
+        reported: reportedText(r),
         known: rVis(r) ? 'Known' : r.date > cur ? 'After' : 'Reported later',
         knownColor: rVis(r) ? C.ink2 : C.rust,
         bg: sel && r.i === sel.i ? '#E6E1D6' : 'transparent',
         onClick: () => store.setState({ sel: r.i, bxUnit: r.unit }),
         onDoc,
-        docLabel: 'Report',
+        docLabel: r.userEntered ? USER_ENTERED : 'Report',
       },
     ];
   });
+  // Verified, but with no date or no exact number. Listed so they are not lost, and never drawn.
+  (m.unplotted ?? []).forEach((u) =>
+    rows.push({
+      date: u.date ? fShort(u.date) : 'Date unknown',
+      value: u.value,
+      valColor: C.ink,
+      unit: u.unit + (u.unit ? ', ' : '') + 'not plotted',
+      flag: '',
+      ref: '',
+      lab: '',
+      reported: '',
+      known: u.reason,
+      knownColor: C.ink3,
+      bg: 'transparent',
+      onClick: () => {},
+      onDoc: (e: Click) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (u.documentId) store.openDocument(u.documentId);
+      },
+      docLabel: u.userEntered ? USER_ENTERED : 'Report',
+    }),
+  );
   const notes = [];
+  const others = archive.unplotted.filter((u) => !archive.markers.some((mk) => mk.key === u.key));
+  if (others.length)
+    notes.push(
+      'Also verified but not plotted, with no collection date or exact number: ' +
+        others.map((u) => `${u.name} ${u.value}${u.unit ? ' ' + u.unit : ''}`).join(', ') +
+        '.',
+    );
   if (labsIn.length > 1)
     notes.push(
       'Reference ranges differ between ' +
@@ -152,7 +191,7 @@ export function biomarkersVM(store: AppStore) {
       cm.name + ' is overlaid on the same axis for context. Only the reference range for ' + m.short + ' is shaded.',
     );
   const step = (key: 'bxFrom' | 'bxTo', d: number) => () =>
-    store.setState((st) => ({ [key]: Math.max(2009, Math.min(2026, st[key] + d)) }));
+    store.setState((st) => ({ [key]: Math.max(archive.firstYear, Math.min(archive.lastYear, st[key] + d)) }));
   return {
     bxQuery: s.bxQuery,
     onBxQuery: (e: InputChange) => store.setState({ bxQuery: e.target.value }),
@@ -231,12 +270,15 @@ export function biomarkersVM(store: AppStore) {
           { k: 'Result', v: fmtR(sel) + ' ' + sel.unit },
           {
             k: 'Flag on report',
-            v: sel.flag ? (sel.flag === 'H' ? 'H, above printed range' : 'L, below printed range') : 'None',
+            v: flagText(sel.flag),
           },
           { k: 'Range printed on report', v: refText(sel) },
           { k: 'Laboratory', v: archive.labs[sel.lab] },
-          { k: 'Ordered by', v: archive.whoBySource[archive.labs[sel.lab]] },
-          { k: 'Reported', v: fShort(sel.documented) },
+          ...(sel.reportedName
+            ? [{ k: 'Name on report', v: sel.reportedName }]
+            : [{ k: 'Ordered by', v: archive.whoBySource[archive.labs[sel.lab]] }]),
+          { k: 'Reported', v: reportedText(sel) },
+          ...(provenanceText(sel) ? [{ k: 'Provenance', v: provenanceText(sel) }] : []),
           {
             k: 'Previous result, same unit',
             v: prev ? fmtR(prev) + ' ' + prev.unit + ', ' + fShort(prev.date) : 'None in archive',
@@ -245,7 +287,13 @@ export function biomarkersVM(store: AppStore) {
       : [],
     bxSelStatus: sel ? knownTxt(sel) : '',
     bxSelStatusColor: sel && rVis(sel) ? C.ink2 : C.rust,
-    bxSelDoc: sel ? 'Laboratory report, ' + archive.labs[sel.lab] + ', ' + fShort(sel.date) : '',
+    bxSelDoc: !sel
+      ? ''
+      : sel.userEntered
+        ? archive.drawDocuments[sel.i]
+          ? 'user-entered, linked to a document'
+          : 'none, user-entered'
+        : 'Laboratory report, ' + archive.labs[sel.lab] + ', ' + fShort(sel.date),
     bxOpenDoc: (e: Click) => {
       e.preventDefault();
       if (sel) store.openDrawDocument(sel.i);

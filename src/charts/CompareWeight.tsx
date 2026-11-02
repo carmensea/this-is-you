@@ -4,7 +4,7 @@ import { niceTicks } from '../domain/format';
 import type { WeightReading, ISODate } from '../domain/types';
 import { useStore } from '../state/useStore';
 import { C, MONO, SERIF } from '../theme';
-import { T0A, T1A, hatchDef, xAxis } from './scale';
+import { hatchDef, xAxis } from './scale';
 
 export function CompareWeight({
   width,
@@ -23,6 +23,7 @@ export function CompareWeight({
 }) {
   const store = useStore(),
     archive = store.archive;
+  const { chartStart: T0A, chartEnd: T1A } = archive;
   const W = width,
     H = 230,
     L = 60,

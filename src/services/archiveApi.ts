@@ -1,9 +1,11 @@
 // The seam between the app and its data. Screens read only the Archive an implementation returns.
-import type { Archive, ArchiveDocument, MetadataFieldKey } from '../domain/types';
+import type { Archive, ArchiveDocument, LabObservation, MetadataFieldKey } from '../domain/types';
 
 export interface ArchiveApi {
   loadArchive(): Promise<Archive>;
 }
+
+export type ObservationFieldValues = Record<string, string | null | undefined>;
 
 export type FieldDecision =
   { action: 'confirmed'; proposal_id: number } | { action: 'corrected'; value: string } | { action: 'not_stated' };
@@ -34,4 +36,13 @@ export interface DocumentsBackend {
   decide(id: string, field: MetadataFieldKey, decision: FieldDecision): Promise<ArchiveDocument>;
   setReview(id: string, complete: boolean): Promise<ArchiveDocument>;
   readAgain(id: string): Promise<ArchiveDocument>;
+  listObservations(): Promise<LabObservation[]>;
+  correctObservation(id: string, fields: ObservationFieldValues): Promise<LabObservation>;
+  setObservationStatus(id: string, action: 'verify' | 'reject' | 'reopen'): Promise<LabObservation>;
+  verifyObservations(ids: string[]): Promise<unknown>;
+  createObservation(
+    fields: ObservationFieldValues,
+    documentId: string | null,
+    verify: boolean,
+  ): Promise<LabObservation>;
 }

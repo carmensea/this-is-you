@@ -4,8 +4,8 @@ A local-first, open-source personal health archive and time machine. Pick any da
 
 This version does two separate things:
 
-- **Your archive** stores real PDF files on your computer, unchanged, and reads text-based ones to propose basic details: document type, date of service, provider and title. Nothing counts as verified until you confirm or correct it. Test results are not extracted yet, so the record-based screens (Overview, Biomarkers, Medical history, Compare) stay empty and say why.
-- **The demo archive** is a complete, entirely fictional record that shows what those screens are for. Its import is simulated.
+- **Your archive** stores real PDF files on your computer, unchanged, and reads text-based ones to propose document details and common laboratory results. Nothing counts as verified until you approve it. Biomarkers, Overview, Medical history and Compare show only results you have verified, or entered yourself.
+- **The demo archive** is a complete, entirely fictional record. Its import is simulated.
 
 The two never mix. See [Demo mode](#demo-mode).
 
@@ -89,14 +89,40 @@ Each document has three separate statuses:
 
 **For each detail you can** confirm the proposal, correct it, or mark it as not stated in the document. Decisions are append-only, and the proposal stays beside your correction, so every change can be traced. The original file is never touched. Changing a detail after a finished review reopens the review. A review can only finish once every detail has a decision.
 
-**What the reader does not handle:**
+## Laboratory results
+
+**What is recognized.** Rows from text-based PDFs for complete blood counts, metabolic panels, lipid panels and thyroid tests, in common layouts: test name, value, unit, reference range and flag, in any of the usual column orders. Rules are fixed and local. Other tests are proposed only when a row has a name, value, unit and range together, and they are marked for a closer look. Anything else is left alone, and the document stays reviewable with results added by hand.
+
+**What is never made up.** A missing unit stays missing. A flag is only what the laboratory printed, and is never worked out from the range. Values are kept exactly as printed, so 14.20 stays 14.20.
+
+**Four separate dates.** Each result keeps these apart, and none stands in for another:
+
+| Date | Meaning | If unknown |
+| --- | --- | --- |
+| `collected_on` | When the specimen was taken. Charts use this. | Stays unknown. The result is listed but not drawn. |
+| `reported_on` | The date printed on the report | Stays unknown. Screens say "Not printed". |
+| `documented_on` | When the result entered any record. Proposed from the report date. | Stays unknown. See below. |
+| `imported_at` | When it reached this archive | Always known |
+
+**As known then and as understood now.** "As understood now" places a result at its collection date. "As known then" places it at its documented date, or at its import date when no documented date is known. So a 2015 result imported today, with no report date, is hidden from "as known then" for 2016. That is deliberate: nothing shows it was documented earlier. If you know when it was documented, enter that date.
+
+**Review.** The original PDF sits beside a table of proposed results, each with its source page, line and text. You can accept or reject each one, correct its name, value, unit, range, flag and dates, or add one by hand. Every action saves immediately, so you can stop and resume. Correcting an accepted result takes it off the charts until you accept it again. What was first read and every change after that are kept in `lab_observation_revisions`.
+
+**User-entered results.** Use **Enter a result** on the Import screen for a result with no document, or **Add a measurement** during a review to link one to a document. These are always labeled "User-entered" wherever they appear, keep their editing history, and never count as coming from a laboratory report, even when linked to a document. One entered from the Import screen goes on the charts immediately, because you typed it. One added to a document during review waits for you to accept it, like the others on that page. If you enter a result that a report you accepted also contains, the chart shows the report's copy.
+
+**Charts.** Only verified results with a collection date and an exact number are drawn. Limits such as `<0.5`, and results with no collection date, are listed but not drawn. Each point keeps the range printed on its own report, and no band is drawn when none was printed. Different units are plotted separately, and comparisons across units are refused. The app stores a converted value when a conversion for that test is known, but charts do not use it. The same test, date, value and unit from two documents is drawn once. Numbers are shown as recorded, and the app does not say whether a change is good or bad.
+
+**Test identifiers** are this app's own (`this-is-you-v1`), not LOINC, because a correct LOINC code depends on specimen and method details that reports often leave out.
+
+## What the document reader does not handle
+
 
 - **Scanned or image-only PDFs** are detected, stored and viewable, but not read. There is no OCR. Enter their details by hand.
 - **Password-protected PDFs** are detected and not opened by the reader, even if the password is blank.
 - **Partly readable files** are marked `partial`, for example when some pages are scans. Only the first 30 pages are read.
-- **Non-English documents and unusual layouts** will mostly get no proposal. Rules look for English labels. Finding nothing is reported as nothing.
+- **Non-English documents and unusual layouts** will mostly get no proposal. Rules look for English labels. Finding nothing is reported as nothing. A result split across lines, or a table drawn as an image, is not recognized.
 - **A date like 03/11/2020** could mean March or November, so it is proposed at low confidence with both readings shown.
-- **Patient identity is not checked.** The app does not notice a document that belongs to someone else.
+- **Patient identity is not checked.** The app does not notice a document, or a result, that belongs to someone else.
 
 **Duplicates.** Identical bytes are one document and are not read twice. Different files with the same text, such as the same report saved twice, are both kept and flagged as possible duplicates. You decide what they are.
 
@@ -115,6 +141,12 @@ Each document has three separate statuses:
 | `POST /api/documents/{id}/metadata/{field}` | Record a decision: `confirmed` (with `proposal_id`), `corrected` (with `value`) or `not_stated` |
 | `POST /api/documents/{id}/review` | `{"complete": true}` finishes the review. Refused until every detail is decided. |
 | `POST /api/documents/{id}/extract` | Read the file again. Adds proposals and keeps every decision. |
+| `GET /api/observations` | Every laboratory result, whatever its status, with history |
+| `POST /api/observations` | Enter a result by hand |
+| `POST /api/observations/{id}/correct` | Correct a result. Takes it off the charts until accepted again. |
+| `POST /api/observations/{id}/verify`, `/reject`, `/reopen` | Accept, reject or reopen one result |
+| `POST /api/observations/verify` | Accept several in one transaction |
+| `GET /api/lab-tests` | The known tests |
 | `GET /api/status` | Whether the service is up, and the size limit |
 
 ## Security and privacy
@@ -147,7 +179,9 @@ backend/
     storage.py      The file store: streaming, hashing, validation
     documents.py    Recording uploads and reading documents back
     metadata.py     Running the reader, proposals and decisions
-    extraction/     worker.py: the limited process. rules.py: the text rules.
+    observations.py Laboratory results: creating, correcting, approving
+    lab_catalog.py  Known tests, unit spellings, safe conversions
+    extraction/     worker.py: the limited process. rules.py and lab_rows.py: the text rules.
                     runner.py: starts it and checks its output. queue.py: one at a time.
     models.py       Database tables
     migrations/     Alembic migrations, applied on every start
@@ -158,6 +192,7 @@ src/
   domain/       Types, date and number formatting, shared vocabulary. No React.
   data/         The fictional dataset. Only services/demoArchiveApi.ts imports it.
   services/     archiveApi.ts: the interfaces.
+                observationRecords.ts: turns verified results into what the charts read.
                 localArchiveApi.ts: the real service. demoArchiveApi.ts: the demo.
                 importService.ts: the demo's simulated import.
   state/        store.ts: all app state and actions, plain TypeScript.
@@ -170,7 +205,7 @@ src/
 
 Data flows one way: `Archive` → `AppStore` → view model → screen.
 
-**The time machine has two rules.** `state.cur` is the only snapshot date, and every screen reads it. `AppStore.isVisible` decides whether a record is part of the snapshot: "As known then" compares the date it was documented, and "As understood now" compares the date it happened. A real file counts as documented on its import date, and uses its service date only once a person has verified it.
+**The time machine has two rules.** `state.cur` is the only snapshot date, and every screen reads it. `AppStore.isVisible` decides whether a record is part of the snapshot: "As known then" compares the date it was documented, and "As understood now" compares the date it happened. A real document counts as documented on its import date, and uses its service date only once a person has verified it. Results have their own dates, described under [Laboratory results](#laboratory-results).
 
 **Changing the database:** edit `models.py`, then generate a migration against a scratch folder, never your real archive:
 

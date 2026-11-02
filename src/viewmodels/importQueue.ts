@@ -2,6 +2,7 @@ import type { DragEvent } from 'react';
 import { fShort } from '../domain/dates';
 import { plural } from '../domain/format';
 import { OUTCOME } from '../domain/vocabulary';
+import type { ObservationFields } from '../components/ObservationForm';
 import { C } from '../theme';
 import type { AppStore } from '../state/store';
 import type { ArchiveDocument, ImportJob, ImportOutcome } from '../domain/types';
@@ -90,7 +91,7 @@ const personalCopy = (maxBytes: number): typeof DEMO_COPY => ({
   readRows: [
     {
       k: 'PDF',
-      text: 'PDFs with real text: document type, date, provider and title are proposed for you to check. Test results are not extracted yet.',
+      text: 'PDFs with real text: document details and common laboratory results are proposed for you to check. Nothing is verified until you accept it.',
     },
     {
       k: 'Scan',
@@ -106,8 +107,8 @@ const personalCopy = (maxBytes: number): typeof DEMO_COPY => ({
   steps: [
     'The original file is copied into the archive unchanged, with a checksum.',
     'Text is read on this computer, in a separate process with limits on time and memory. Scanned pages are not read.',
-    'Document type, date, provider and title are proposed, each with its source and a confidence level.',
-    'You confirm or correct each detail against the original. Only then is it verified.',
+    'Document details and common laboratory results are proposed, each with its source and a confidence level.',
+    'You accept, correct or reject each one against the original. Only then is it verified and shown in Biomarkers.',
   ],
 });
 
@@ -221,5 +222,40 @@ export function importVM(store: AppStore) {
   });
   const impQueueCount = plural(queue.length, 'document') + ' waiting for review';
   const impQueueEmpty = !queue.length;
-  return { ...out, impQueue, impQueueCount, impQueueEmpty };
+  const manual = archive.observations.filter((o) => o.origin === 'manual' && !o.document_id);
+  const manualRows = manual.map((o) => ({
+    id: o.id,
+    observation: o,
+    name: o.reported_name,
+    value: o.value_text + (o.unit ? ' ' + o.unit : ''),
+    date: o.collected_on ? fShort(o.collected_on) : 'Collection date unknown',
+    status:
+      o.verification_status === 'verified'
+        ? 'User-entered, shown in charts'
+        : o.verification_status === 'rejected'
+          ? 'Removed from charts'
+          : 'Not verified',
+    statusColor: o.verification_status === 'verified' ? C.green : C.ink3,
+    history: o.edited
+      ? `Edited ${plural(o.revisions.filter((r) => r.action === 'corrected').length, 'time')}. First entered as ${String(o.original.value_text)}.`
+      : 'Not edited since it was entered.',
+    isEditing: s.manualEdit === o.id,
+    isRejected: o.verification_status === 'rejected',
+    onEdit: () => store.setState({ manualEdit: o.id }),
+    onCancel: () => store.setState({ manualEdit: null }),
+    onSave: (fields: ObservationFields) => store.correctManual(o.id, fields),
+    onRemove: () => void store.setObservationStatus(o.id, 'reject'),
+    onRestore: () => void store.setObservationStatus(o.id, 'verify'),
+  }));
+  return {
+    ...out,
+    impQueue,
+    impQueueCount,
+    impQueueEmpty,
+    manualRows,
+    manualOpen: s.manualOpen,
+    testNames: archive.testNames,
+    toggleManual: () => store.setState((st) => ({ manualOpen: !st.manualOpen })),
+    saveManual: (fields: ObservationFields) => store.createObservation(fields, null, true),
+  };
 }

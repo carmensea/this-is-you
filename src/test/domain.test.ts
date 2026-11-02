@@ -34,5 +34,12 @@ describe('format', () => {
     expect(t[0]).toBe(a);
     expect(t[t.length - 1]).toBe(b);
   });
+  it('copes when every value on a chart is the same', () => {
+    const { a, b, t } = niceTicks(118, 118, 5);
+    expect(a).toBeLessThan(118);
+    expect(b).toBeGreaterThan(118);
+    expect(t.length).toBeGreaterThan(1);
+    expect(niceTicks(0, 0, 5).t.length).toBeGreaterThan(1);
+  });
   it('names unknown file types honestly', () => expect(kindOf('IMG_2041.HEIC')).toBe('Unrecognized format'));
 });

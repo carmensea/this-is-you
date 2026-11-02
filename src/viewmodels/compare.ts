@@ -1,10 +1,19 @@
 import type { Click, InputChange } from './events';
-import { addDays, addMonths, fLong, fMY, fShort, monthsBetween, span } from '../domain/dates';
-import { doseAt, fmtR, plural, refText } from '../domain/format';
+import { addMonths, fLong, fMY, fShort, monthsBetween, span } from '../domain/dates';
+import { USER_ENTERED, doseAt, fmtR, plural, refText } from '../domain/format';
 import { TYPE_LABEL } from '../domain/vocabulary';
 import { C } from '../theme';
 import type { AppState, AppStore } from '../state/store';
-import type { Diagnosis, EventType, HealthEvent, ISODate, LabResult, Marker, Medication, WeightReading } from '../domain/types';
+import type {
+  Diagnosis,
+  EventType,
+  HealthEvent,
+  ISODate,
+  LabResult,
+  Marker,
+  Medication,
+  WeightReading,
+} from '../domain/types';
 
 type SnapKey = 'cA' | 'cB';
 
@@ -58,6 +67,7 @@ export function compareVM(store: AppStore) {
           lag: lag(r.date, snap),
           ref: 'Range ' + refText(r),
           lab: archive.labs[r.lab],
+          sourceLabel: r.userEntered ? USER_ENTERED : 'Source',
           onDoc: (e: Click) => {
             stopEv(e);
             store.openDrawDocument(r.i);
@@ -66,6 +76,7 @@ export function compareVM(store: AppStore) {
       : {
           has: false,
           none: true,
+          sourceLabel: '',
           value: 'No recorded value',
           flag: '',
           date: '',
@@ -150,6 +161,7 @@ export function compareVM(store: AppStore) {
           date: fShort(w.date),
           lag: lag(w.date, snap),
           ref: w.src === 'clinic' ? 'Clinic visit measurement' : 'Smart scale reading',
+          sourceLabel: 'Source',
           lab: '',
           onDoc: (e: Click) => {
             stopEv(e);
@@ -165,30 +177,31 @@ export function compareVM(store: AppStore) {
     wch = (d > 0 ? '+' : d < 0 ? '−' : '±') + Math.abs(d).toFixed(1) + ' ' + wu;
     wnote = wa.src !== wb.src ? 'Clinic scale and home scale differ' : 'Later minus earlier';
   } else if (wa && wb) wnote = 'Same reading at both dates';
-  groups.push({
-    name: 'Weight and body measurements',
-    count: (wa && wb ? '1' : '0') + ' of 1 recorded at both dates',
-    rows: [
-      {
-        name: 'Body weight',
-        unit: wu,
-        a: wcell(wa, A),
-        b: wcell(wb, B),
-        change: wch,
-        note: wnote,
-        bg: 'transparent',
-        current: false,
-        both: !!(wa && wb),
-        any: true,
-        onClick: () =>
-          setTimeout(() => {
-            const el = document.getElementById('cmp-weight');
-            if (el) window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 24);
-          }, 30),
-        onExplore: (e: Click) => stopEv(e),
-      },
-    ],
-  });
+  if (archive.weight.length)
+    groups.push({
+      name: 'Weight and body measurements',
+      count: (wa && wb ? '1' : '0') + ' of 1 recorded at both dates',
+      rows: [
+        {
+          name: 'Body weight',
+          unit: wu,
+          a: wcell(wa, A),
+          b: wcell(wb, B),
+          change: wch,
+          note: wnote,
+          bg: 'transparent',
+          current: false,
+          both: !!(wa && wb),
+          any: true,
+          onClick: () =>
+            setTimeout(() => {
+              const el = document.getElementById('cmp-weight');
+              if (el) window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 24);
+            }, 30),
+          onExplore: (e: Click) => stopEv(e),
+        },
+      ],
+    });
 
   const m = archive.markers.find((x) => x.key === s.cMk) || archive.markers[0];
   const ra = m.results.filter(vA).pop(),
@@ -204,8 +217,8 @@ export function compareVM(store: AppStore) {
       hxQuery: e.title,
       hxTypes: {},
       hxSource: 'all',
-      hxFrom: 2009,
-      hxTo: 2026,
+      hxFrom: archive.firstYear,
+      hxTo: archive.lastYear,
       hxShowAfter: true,
       hxOpen: { [e.id]: true },
       returnTo: { view: 'compare', y: window.scrollY },
@@ -286,7 +299,8 @@ export function compareVM(store: AppStore) {
   const docsAt = (d: ISODate) =>
     archive.documents.filter((x) => (mode === 'known' ? x.documented : x.date) <= d).length;
   const resAt = (v: (r: LabResult) => boolean) => archive.markers.reduce((n, mk) => n + mk.results.filter(v).length, 0);
-  const drawsAt = (d: ISODate) => archive.draws.filter(([dd]) => (mode === 'known' ? addDays(dd, 4) : dd) <= d).length;
+  const drawsAt = (d: ISODate) =>
+    archive.draws.filter(([dd], i) => (mode === 'known' ? archive.drawDocumented[i] : dd) <= d).length;
   const cntT = (d: ISODate, types: EventType[]) =>
     archive.events.filter((e) => types.indexOf(e.type) >= 0 && inRec(e, d)).length;
   const led = (label: string, a: number, b: number) => ({
@@ -352,7 +366,9 @@ export function compareVM(store: AppStore) {
   const snapBlock = (d: ISODate, key: SnapKey) => ({
     date: fLong(d),
     dVal: d,
-    meta: 'Age ' + age(d) + ' · ' + (d === archive.today ? 'today' : span(d, archive.today) + ' before today'),
+    meta:
+      (archive.born ? 'Age ' + age(d) + ' · ' : '') +
+      (d === archive.today ? 'today' : span(d, archive.today) + ' before today'),
     onDate: (e: InputChange) => {
       if (e.target.value) setK(key, e.target.value);
     },
@@ -380,6 +396,7 @@ export function compareVM(store: AppStore) {
         ').'
       : l + ': no recorded value by ' + fShort(snap) + '.';
   return {
+    hasWeight: archive.weight.length > 0,
     minDate: archive.start,
     maxDate: archive.today,
     cA: sa,

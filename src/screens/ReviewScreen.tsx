@@ -1,4 +1,5 @@
 import { Segmented } from '../components/controls';
+import { ObservationForm } from '../components/ObservationForm';
 import { OriginalFile } from '../components/OriginalFile';
 import { useStore } from '../state/useStore';
 import { C, MONO, SANS, SERIF } from '../theme';
@@ -117,11 +118,11 @@ function OriginalDocument({ v }: { v: VM }) {
             )}
           </div>
           {!v.rvIsReal && (
-<p style={{ fontSize: 12, color: C.muted, margin: '10px 0 0', lineHeight: 1.5 }}>
-            Dotted underlines mark text read with low confidence. Select a line to find its extracted value. The
-            original is never changed by your review.
-          </p>
-)}
+            <p style={{ fontSize: 12, color: C.muted, margin: '10px 0 0', lineHeight: 1.5 }}>
+              Dotted underlines mark text read with low confidence. Select a line to find its extracted value. The
+              original is never changed by your review.
+            </p>
+          )}
         </>
       )}
     </section>
@@ -244,7 +245,7 @@ function ExtractedValues({ v }: { v: VM }) {
           )}
         </div>
       ))}{' '}
-      {v.rvHasLines && (
+      {(v.rvHasLines || v.rvIsReal) && (
         <>
           <div
             style={{
@@ -260,6 +261,11 @@ function ExtractedValues({ v }: { v: VM }) {
           >
             <h2 style={s.heading3}>Measurements</h2>
             <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+              {v.rvIsReal && (
+                <button onClick={v.rvToggleAdd} style={s.link125}>
+                  Add a measurement
+                </button>
+              )}
               <Segmented items={v.rvFilters} />
               {v.rvHasHigh && (
                 <button
@@ -271,6 +277,19 @@ function ExtractedValues({ v }: { v: VM }) {
               )}
             </div>
           </div>
+          {v.rvAdding && (
+            <ObservationForm
+              testNames={v.testNames}
+              saveLabel="Add measurement"
+              onSave={v.rvAddMeasurement}
+              onCancel={v.rvToggleAdd}
+            />
+          )}
+          {v.rvNoneRecognized && (
+            <p style={{ margin: '12px 4px', fontSize: 13, color: C.ink2 }}>
+              No measurements were recognized in this document. If it contains results, add them by hand.
+            </p>
+          )}
           <div style={{ overflowX: 'auto' }}>
             <div style={{ minWidth: 640 }}>
               <div
@@ -319,7 +338,7 @@ function ExtractedValues({ v }: { v: VM }) {
                           onClick={l.onConfirm}
                           style={{ fontSize: 12, color: C.green, borderBottom: `1px solid ${C.green}` }}
                         >
-                          Confirm
+                          {v.rvIsReal ? 'Accept' : 'Confirm'}
                         </button>
                       )}
                       <button onClick={l.onEdit} style={s.link12}>
@@ -330,7 +349,7 @@ function ExtractedValues({ v }: { v: VM }) {
                           onClick={l.onExclude}
                           style={{ fontSize: 12, color: C.muted, borderBottom: '1px solid #9C978C' }}
                         >
-                          Exclude
+                          {v.rvIsReal ? 'Reject' : 'Exclude'}
                         </button>
                       )}
                       {l.isExcluded && (
@@ -350,10 +369,37 @@ function ExtractedValues({ v }: { v: VM }) {
                     }}
                   >
                     <span style={{ color: l.statusColor }}>{l.statusText}</span>
+                    {l.dates && <span style={{ color: C.ink2 }}>{l.dates}</span>}
                     {l.isLow && <span style={{ color: C.rust }}>{l.reason}</span>}
-                    {l.isEdited && <span style={{ color: C.muted }}>{l.editedText}</span>}
+                    {l.isEdited && <span style={{ color: C.muted }}>{l.realEditedText || l.editedText}</span>}
+                    {l.duplicateNote && <span style={{ color: C.amber }}>{l.duplicateNote}</span>}
+                    {l.evidence && (
+                      <span style={{ color: C.muted, overflowWrap: 'anywhere' }}>
+                        {l.evidence}
+                        {l.evidencePage > 0 && (
+                          <>
+                            {' '}
+                            <button
+                              onClick={l.onShowPage}
+                              style={{ fontSize: 12, borderBottom: `1px solid ${C.faint}` }}
+                            >
+                              Show page {l.evidencePage}
+                            </button>
+                          </>
+                        )}
+                      </span>
+                    )}
                   </div>
-                  {l.isEditing && (
+                  {l.isEditing && l.observation && (
+                    <ObservationForm
+                      initial={l.observation}
+                      testNames={v.testNames}
+                      saveLabel="Save correction"
+                      onSave={l.onSaveForm}
+                      onCancel={l.onCancelForm}
+                    />
+                  )}
+                  {l.isEditing && !l.observation && (
                     <div style={{ margin: '0 6px 12px 30px', padding: 14, background: C.hover }}>
                       <div
                         style={{
@@ -491,7 +537,9 @@ function Confirm({ v }: { v: VM }) {
       aria-label="Confirm"
       style={{ marginTop: 24, borderTop: `1px solid ${C.ink}`, paddingTop: 18, maxWidth: 820 }}
     >
-      <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 28, margin: 0 }}>Accept into the archive</h2>
+      <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 28, margin: 0 }}>
+        {v.rvIsReal ? 'Finish this review' : 'Accept into the archive'}
+      </h2>
       <p style={{ fontSize: 15, lineHeight: 1.55, margin: '12px 0 0' }}>{v.rvSumAdd}</p>
       {v.rvHasEdits && (
         <div style={{ marginTop: 18 }}>

@@ -2,10 +2,48 @@ import type { InputChange } from './events';
 import { fLong, fShort } from '../domain/dates';
 import { fmtR, plural, rangeOnly } from '../domain/format';
 import { DCATL, DCATS, STATUS, TYPE_LABEL } from '../domain/vocabulary';
-import { EXTRACTION_LABEL, FIELD_LABEL, FIELD_ORDER, REVIEW_LABEL, VERIFICATION_LABEL, canReview, describeField, isReading, proposalCount, typeLabel } from '../domain/documentReview';
+import {
+  EXTRACTION_LABEL,
+  FIELD_LABEL,
+  FIELD_ORDER,
+  REVIEW_LABEL,
+  VERIFICATION_LABEL,
+  canReview,
+  describeField,
+  isReading,
+  proposalCount,
+  typeLabel,
+} from '../domain/documentReview';
 import { C } from '../theme';
 import type { AppStore } from '../state/store';
-import type { ArchiveDocument, DocumentStatus } from '../domain/types';
+import type { ArchiveDocument, DocumentStatus, LabObservation } from '../domain/types';
+
+function realExtractedRow(store: AppStore, documentId: string, o: LabObservation) {
+  const marker = store.archive.markers.find((mk) => mk.results.some((r) => r.observationId === o.id));
+  const result = marker?.results.find((r) => r.observationId === o.id);
+  return {
+    name: o.reported_name,
+    value: o.value_text + (o.unit ? ' ' + o.unit : ''),
+    ref: o.reference_text ?? '',
+    flag: o.flag ?? '',
+    status:
+      o.verification_status === 'verified'
+        ? o.origin === 'manual'
+          ? 'User-entered'
+          : 'Accepted'
+        : o.verification_status === 'rejected'
+          ? 'Rejected'
+          : 'Proposed',
+    statusColor:
+      o.verification_status === 'verified' ? C.green : o.verification_status === 'rejected' ? C.ink3 : C.amber,
+    bg: 'transparent',
+    onLocate: () => o.source_page && store.setState({ dSource: { id: documentId, page: o.source_page } }),
+    onChart: () => {
+      if (marker && result)
+        store.goFrom('biomarkers', { marker: marker.key, sel: result.i, bxUnit: result.unit, bxCmp: null });
+    },
+  };
+}
 
 const REVIEW_STATUS_NOTE: Record<DocumentStatus, string> = {
   uploaded: 'Original stored.',
@@ -176,6 +214,7 @@ export function documentsVM(store: AppStore) {
           : ['Parsed', '#8A5A1F']
         : ['Not extracted', C.ink3];
   const preview = sel.draw != null && !sel.dup;
+  const real = sel.review?.observations;
   return {
     ...out,
     detail: {
@@ -190,7 +229,9 @@ export function documentsVM(store: AppStore) {
         ? 'In the record by the snapshot date, ' + fShort(cur) + '.'
         : 'Not yet in the record on the snapshot date, ' + fShort(cur) + '. Documented ' + fShort(sel.documented) + '.',
       ddKnownColor: known ? C.ink2 : C.rust,
-      ddContentUrl: sel.contentUrl ?? null,
+      ddContentUrl: sel.contentUrl
+        ? sel.contentUrl + (s.dSource?.id === sel.id ? `#page=${s.dSource.page}` : '')
+        : null,
       ddHasNote: !!sel.note,
       ddNote: sel.note || '',
       ddReviewLabel: sel.review
@@ -221,6 +262,13 @@ export function documentsVM(store: AppStore) {
             { k: 'Checksum, SHA-256', v: sel.hash },
             { k: 'Original file', v: 'Stored unchanged since import' },
             { k: 'Original filename', v: sel.file },
+            {
+              k: 'Measurements',
+              v:
+                real && real.length
+                  ? `${real.filter((o) => o.verification_status === 'verified').length} accepted of ${real.length}`
+                  : 'None recognized',
+            },
           ]
         : [
             { k: 'Document type', v: DCATL[sel.cat] },
@@ -260,8 +308,8 @@ export function documentsVM(store: AppStore) {
           hxQuery: '',
           hxTypes: {},
           hxSource: 'all',
-          hxFrom: 2009,
-          hxTo: 2026,
+          hxFrom: archive.firstYear,
+          hxTo: archive.lastYear,
           hxShowAfter: true,
           hxOpen: { [ev.id]: true },
           returnTo: { view: 'documents', y: 0 },
@@ -307,32 +355,36 @@ export function documentsVM(store: AppStore) {
         outline: s.dHL === mk.key ? '1px solid ' + C.green : '1px solid transparent',
         onClick: () => store.setState({ dHL: mk.key }),
       })),
-      ddHasLines: lines.length > 0 && !sel.dup,
-      ddLinesCount: plural(lines.length, 'measurement') + ' extracted from this report',
-      ddExtracted: lines.map(({ mk, r }, idx) => {
-        const ls = lineStatus(mk.key);
-        return {
-          name: mk.name,
-          value: fmtR(r) + ' ' + r.unit,
-          ref: rangeOnly(r),
-          flag: r.flag,
-          status: ls[0],
-          statusColor: ls[1],
-          bg: s.dHL === mk.key ? C.greenT : 'transparent',
-          onLocate: () => store.setState({ dHL: mk.key, dPage: Math.floor(idx / 8) }),
-          onChart: () => {
-            store.setState({
-              view: 'biomarkers',
-              marker: mk.key,
-              sel: r.i,
-              bxUnit: r.unit,
-              bxCmp: null,
-              returnTo: { view: 'documents', y: window.scrollY },
-            });
-            window.scrollTo(0, 0);
-          },
-        };
-      }),
+      ddHasLines: real ? real.length > 0 : lines.length > 0 && !sel.dup,
+      ddLinesCount: real
+        ? `${plural(real.length, 'measurement')}: ${real.filter((o) => o.verification_status === 'verified').length} accepted, ${real.filter((o) => o.verification_status === 'rejected').length} rejected`
+        : plural(lines.length, 'measurement') + ' extracted from this report',
+      ddExtracted: real
+        ? real.map((o) => realExtractedRow(store, sel.id, o))
+        : lines.map(({ mk, r }, idx) => {
+            const ls = lineStatus(mk.key);
+            return {
+              name: mk.name,
+              value: fmtR(r) + ' ' + r.unit,
+              ref: rangeOnly(r),
+              flag: r.flag,
+              status: ls[0],
+              statusColor: ls[1],
+              bg: s.dHL === mk.key ? C.greenT : 'transparent',
+              onLocate: () => store.setState({ dHL: mk.key, dPage: Math.floor(idx / 8) }),
+              onChart: () => {
+                store.setState({
+                  view: 'biomarkers',
+                  marker: mk.key,
+                  sel: r.i,
+                  bxUnit: r.unit,
+                  bxCmp: null,
+                  returnTo: { view: 'documents', y: window.scrollY },
+                });
+                window.scrollTo(0, 0);
+              },
+            };
+          }),
       ddHasRecord: !lines.length && !!ev,
       ddRecordText: ev ? TYPE_LABEL[ev.type] + ' in Medical history: ' + ev.title + ', ' + fShort(ev.date) : '',
     },
