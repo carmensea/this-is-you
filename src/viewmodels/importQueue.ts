@@ -4,7 +4,8 @@ import { plural } from '../domain/format';
 import { OUTCOME } from '../domain/vocabulary';
 import { C } from '../theme';
 import type { AppStore } from '../state/store';
-import type { ImportJob, ImportOutcome } from '../domain/types';
+import type { ArchiveDocument, ImportJob, ImportOutcome } from '../domain/types';
+import { EXTRACTION_LABEL, FIELD_ORDER, canReview, isReading, proposalCount } from '../domain/documentReview';
 
 /** Opens the browser file picker. */
 function chooseFiles(store: AppStore, folder: boolean) {
@@ -52,16 +53,50 @@ const DEMO_COPY = {
   ],
 };
 
+/** Once a real upload is stored, its row follows what the reader and the person have done since. */
+function realRow(d: ArchiveDocument | undefined, f: ImportJob) {
+  if (!d?.review || f.outcome !== 'stored') return {};
+  const r = d.review;
+  const read = !isReading(d) && r.extraction !== 'failed';
+  const reading = isReading(d);
+  const count = proposalCount(r);
+  const label = reading
+    ? 'Stored, being read'
+    : r.review === 'completed'
+      ? 'Reviewed'
+      : count
+        ? 'Stored, ready for review'
+        : 'Stored, needs details by hand';
+  return {
+    statusLabel: label,
+    statusColor: reading ? C.ink2 : r.review === 'completed' ? C.green : count ? C.amber : C.rust,
+    result: reading
+      ? 'Stored unchanged on this computer. Reading its text now.'
+      : `Stored unchanged. ${EXTRACTION_LABEL[r.extraction]}. ${count ? plural(count, 'detail') + ' proposed, none verified yet.' : 'No details could be proposed.'}`,
+    p2: read ? C.ink : 'transparent',
+    p3: count ? C.ink : 'transparent',
+    p4: r.review === 'completed' ? C.ink : 'transparent',
+  };
+}
+
 const personalCopy = (maxBytes: number): typeof DEMO_COPY => ({
   headNote:
-    'Files stay on this computer. Each PDF is stored unchanged with a checksum. Nothing in this version reads its contents.',
+    'Files stay on this computer. Each PDF is stored unchanged, then read here to propose basic details for you to check. Nothing is sent anywhere.',
   dropTitle: 'Drop PDF files here',
   dropBody:
-    'Each original is copied into the archive on this computer, unchanged. An identical file is recognized and set aside instead of being stored twice.',
+    'Each original is copied into the archive on this computer, unchanged. An identical file is recognized and set aside instead of being stored twice. Nothing counts as verified until you confirm it.',
   formats: `PDF only · up to ${Math.floor(maxBytes / 1048576)} MB per file`,
   readTitle: 'What can be imported',
   readRows: [
-    { k: 'PDF', text: 'Stored unchanged, and viewable from Documents. Its contents are not read in this version.' },
+    {
+      k: 'PDF',
+      text: 'PDFs with real text: document type, date, provider and title are proposed for you to check. Test results are not extracted yet.',
+    },
+    {
+      k: 'Scan',
+      warn: true,
+      text: 'Scanned, image-only and password-protected PDFs are stored and viewable, but not read. Enter their details by hand.',
+    },
     {
       k: 'Other',
       warn: true,
@@ -70,9 +105,9 @@ const personalCopy = (maxBytes: number): typeof DEMO_COPY => ({
   ],
   steps: [
     'The original file is copied into the archive unchanged, with a checksum.',
-    'Not available in this version.',
-    'Not available in this version.',
-    'Not available in this version. Stored files are not health information in your archive until they can be reviewed.',
+    'Text is read on this computer, in a separate process with limits on time and memory. Scanned pages are not read.',
+    'Document type, date, provider and title are proposed, each with its source and a confidence level.',
+    'You confirm or correct each detail against the original. Only then is it verified.',
   ],
 });
 
@@ -146,6 +181,7 @@ export function importVM(store: AppStore) {
         statusColor: f.done ? o.color : C.ink2,
         p1: stored ? C.ink : 'transparent',
         p2: personal ? 'transparent' : f.done && o.read ? C.ink : !f.done && f.pct >= 60 ? C.ink : 'transparent',
+        ...realRow(archive.documentsById[f.documentId ?? ''], f),
         documentId: f.documentId,
         onView: () => store.go('documents', { dSel: f.documentId ?? null, dPage: 0, dHL: null }),
         p3: !personal && f.done && o.ext ? C.ink : 'transparent',
@@ -154,19 +190,24 @@ export function importVM(store: AppStore) {
     }),
   };
   const queue = archive.documents
-    .filter((d) => store.documentStatus(d) === 'parsed')
+    .filter((d) => (d.review ? canReview(d) && d.review.review !== 'completed' : store.documentStatus(d) === 'parsed'))
     .sort((a, b) => Number(b.date === '2026-09-24') - Number(a.date === '2026-09-24') || (a.date < b.date ? 1 : -1));
   const impQueue = queue.map((d) => {
     const x = store.reviewData(d.id),
       rs = (s.rv || {})[d.id] || { lines: {}, fields: {} };
     const tot = x.lines.length + x.fields.length,
-      done =
-        x.lines.filter((l) => (rs.lines[l.key] || {}).status).length +
-        x.fields.filter((l) => (rs.fields[l.key] || {}).status).length;
-    const att = x.lines.filter((l) => l.conf === 'low').length + x.fields.filter((l) => l.conf === 'low').length;
+      done = d.review
+        ? FIELD_ORDER.filter((k) => d.review!.fields[k].decidedAt).length
+        : x.lines.filter((l) => (rs.lines[l.key] || {}).status).length +
+          x.fields.filter((l) => (rs.fields[l.key] || {}).status).length;
+    const att = d.review
+      ? FIELD_ORDER.filter(
+          (k) => !d.review!.fields[k].decidedAt && (d.review!.fields[k].proposal?.confidence ?? 'low') === 'low',
+        ).length
+      : x.lines.filter((l) => l.conf === 'low').length + x.fields.filter((l) => l.conf === 'low').length;
     return {
       title: d.title,
-      date: fShort(d.date),
+      date: d.review ? 'Imported ' + d.imported : fShort(d.date),
       source: d.source,
       format: d.format,
       values: x.lines.length ? plural(x.lines.length, 'value') : 'Details only',

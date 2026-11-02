@@ -1,5 +1,6 @@
 import { Fragment } from 'react';
 import { Footer, Checkbox } from '../components/controls';
+import { OriginalFile } from '../components/OriginalFile';
 import { useStore } from '../state/useStore';
 import { C, MONO, SANS, SERIF } from '../theme';
 import { s } from '../components/styles';
@@ -7,28 +8,6 @@ import { shellVM } from '../viewmodels/shell';
 import { documentsVM } from '../viewmodels/documents';
 
 type VM = ReturnType<typeof shellVM> & ReturnType<typeof documentsVM>;
-
-/** The real stored file, shown by the browser's own PDF viewer. */
-function OriginalFile({ title, url }: { title: string; url: string }) {
-  return (
-    <>
-      <div style={{ marginTop: 8, background: '#FFFEFB', border: `1px solid ${C.rule}` }}>
-        <iframe
-          key={url}
-          title={`Original file: ${title}`}
-          src={url}
-          style={{ display: 'block', width: '100%', height: 720, border: 0 }}
-        />
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', marginTop: 10, fontSize: 12 }}>
-        <a href={url} target="_blank" rel="noreferrer">
-          Open original in a new tab
-        </a>
-        <a href={`${url}?download=true`}>Download original</a>
-      </div>
-    </>
-  );
-}
 
 function DocumentList({ v }: { v: VM }) {
   return (
@@ -184,7 +163,7 @@ function DocumentDetail({ v }: { v: VM }) {
                 onClick={v.detail.ddReview}
                 style={{ fontSize: 13, fontWeight: 500, background: C.ink, color: C.paper, padding: '7px 12px' }}
               >
-                Review extracted values
+                {v.detail.ddReviewLabel}
               </button>
             )}
             {v.detail.ddHasEvent && (
@@ -195,12 +174,17 @@ function DocumentDetail({ v }: { v: VM }) {
                 Show in Medical history
               </button>
             )}
+            {v.detail.ddCanReread && (
+              <button onClick={v.detail.ddReread} style={s.link125}>
+                Try reading again
+              </button>
+            )}
             {v.detail.ddHasDup && (
               <button
                 onClick={v.detail.ddOpenDup}
                 style={{ fontSize: 13, borderBottom: `1px solid ${C.ink}`, alignSelf: 'center' }}
               >
-                Open the original copy
+                {v.detail.ddDupLabel}
               </button>
             )}
             <button

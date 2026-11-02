@@ -1,4 +1,5 @@
 import { Segmented } from '../components/controls';
+import { OriginalFile } from '../components/OriginalFile';
 import { useStore } from '../state/useStore';
 import { C, MONO, SANS, SERIF } from '../theme';
 import { s } from '../components/styles';
@@ -16,105 +17,113 @@ function OriginalDocument({ v }: { v: VM }) {
         <span style={s.eyebrow}>Original document, read only</span>
         <span style={{ fontFamily: MONO, fontSize: 11, color: C.muted, overflowWrap: 'anywhere' }}>{v.rvFile}</span>
       </div>
-      <div style={{ marginTop: 8, background: '#FFFEFB', border: `1px solid ${C.rule}`, padding: '26px 28px' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            gap: 16,
-            borderBottom: `1.5px solid ${C.ink}`,
-            paddingBottom: 10,
-            flexWrap: 'wrap',
-          }}
-        >
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{v.rvHead}</span>
-          <span style={{ fontFamily: MONO, fontSize: 10.5, color: C.muted }}>SYNTHETIC SAMPLE RECORD</span>
-        </div>
-        <div style={{ fontSize: 12, color: C.ink2, marginTop: 8 }}>{v.patientLine}</div>
-        <div style={s.sub12}>{v.rvSub}</div>
-        {v.rvScanned && (
-          <div style={{ fontFamily: MONO, fontSize: 10.5, color: C.rust, marginTop: 6 }}>
-            SCANNED PAGE · TEXT RECOGNIZED
-          </div>
-        )}{' '}
-        {v.rvHasLines && (
-          <div style={{ marginTop: 16 }}>
+      {v.rvContentUrl ? (
+        <OriginalFile title={v.rvFile} url={v.rvContentUrl} height={820} />
+      ) : (
+        <>
+          <div style={{ marginTop: 8, background: '#FFFEFB', border: `1px solid ${C.rule}`, padding: '26px 28px' }}>
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0,1.6fr) 64px 26px minmax(0,1fr) 92px',
-                gap: 6,
-                fontSize: 10.5,
-                fontWeight: 600,
-                color: C.muted,
-                borderBottom: `1px solid ${C.ink}`,
-                padding: '0 4px 4px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 16,
+                borderBottom: `1.5px solid ${C.ink}`,
+                paddingBottom: 10,
+                flexWrap: 'wrap',
               }}
             >
-              <span>Test</span>
-              <span style={s.alignRight}>Result</span>
-              <span>Flag</span>
-              <span>Reference</span>
-              <span>Units</span>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{v.rvHead}</span>
+              <span style={{ fontFamily: MONO, fontSize: 10.5, color: C.muted }}>SYNTHETIC SAMPLE RECORD</span>
             </div>
-            {v.rvPrev.map((l, i0) => (
-              <button
-                key={i0}
-                onClick={l.onClick}
+            <div style={{ fontSize: 12, color: C.ink2, marginTop: 8 }}>{v.patientLine}</div>
+            <div style={s.sub12}>{v.rvSub}</div>
+            {v.rvScanned && (
+              <div style={{ fontFamily: MONO, fontSize: 10.5, color: C.rust, marginTop: 6 }}>
+                SCANNED PAGE · TEXT RECOGNIZED
+              </div>
+            )}{' '}
+            {v.rvHasLines && (
+              <div style={{ marginTop: 16 }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0,1.6fr) 64px 26px minmax(0,1fr) 92px',
+                    gap: 6,
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: C.muted,
+                    borderBottom: `1px solid ${C.ink}`,
+                    padding: '0 4px 4px',
+                  }}
+                >
+                  <span>Test</span>
+                  <span style={s.alignRight}>Result</span>
+                  <span>Flag</span>
+                  <span>Reference</span>
+                  <span>Units</span>
+                </div>
+                {v.rvPrev.map((l, i0) => (
+                  <button
+                    key={i0}
+                    onClick={l.onClick}
+                    style={{
+                      width: '100%',
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(0,1.6fr) 64px 26px minmax(0,1fr) 92px',
+                      gap: 6,
+                      fontSize: 11.5,
+                      padding: '5px 4px',
+                      borderBottom: '1px solid #EEEAE1',
+                      background: l.bg,
+                      outline: l.outline,
+                      fontFamily: MONO,
+                    }}
+                  >
+                    <span style={{ fontFamily: SANS }}>{l.name}</span>
+                    <span style={{ textAlign: 'right', textDecoration: l.deco }}>{l.value}</span>
+                    <span style={{ color: C.rust, fontWeight: 500 }}>{l.flag}</span>
+                    <span>{l.ref}</span>
+                    <span style={{ textDecoration: l.deco }}>{l.unit}</span>
+                  </button>
+                ))}
+              </div>
+            )}{' '}
+            {v.rvNoLines && (
+              <div
                 style={{
-                  width: '100%',
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(0,1.6fr) 64px 26px minmax(0,1fr) 92px',
-                  gap: 6,
-                  fontSize: 11.5,
-                  padding: '5px 4px',
-                  borderBottom: '1px solid #EEEAE1',
-                  background: l.bg,
-                  outline: l.outline,
-                  fontFamily: MONO,
+                  marginTop: 18,
+                  background: C.hover,
+                  border: `1px solid ${C.rule2}`,
+                  minHeight: 260,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 24,
                 }}
               >
-                <span style={{ fontFamily: SANS }}>{l.name}</span>
-                <span style={{ textAlign: 'right', textDecoration: l.deco }}>{l.value}</span>
-                <span style={{ color: C.rust, fontWeight: 500 }}>{l.flag}</span>
-                <span>{l.ref}</span>
-                <span style={{ textDecoration: l.deco }}>{l.unit}</span>
-              </button>
-            ))}
+                <span
+                  style={{
+                    fontFamily: MONO,
+                    fontSize: 11.5,
+                    color: C.muted,
+                    textAlign: 'center',
+                    lineHeight: 1.6,
+                    maxWidth: 340,
+                  }}
+                >
+                  Original document text is preserved in the source file. Confirm the details on the right against it.
+                </span>
+              </div>
+            )}
           </div>
-        )}{' '}
-        {v.rvNoLines && (
-          <div
-            style={{
-              marginTop: 18,
-              background: C.hover,
-              border: `1px solid ${C.rule2}`,
-              minHeight: 260,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 24,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: MONO,
-                fontSize: 11.5,
-                color: C.muted,
-                textAlign: 'center',
-                lineHeight: 1.6,
-                maxWidth: 340,
-              }}
-            >
-              Original document text is preserved in the source file. Confirm the details on the right against it.
-            </span>
-          </div>
-        )}
-      </div>
-      <p style={{ fontSize: 12, color: C.muted, margin: '10px 0 0', lineHeight: 1.5 }}>
-        Dotted underlines mark text read with low confidence. Select a line to find its extracted value. The original is
-        never changed by your review.
-      </p>
+          {!v.rvIsReal && (
+<p style={{ fontSize: 12, color: C.muted, margin: '10px 0 0', lineHeight: 1.5 }}>
+            Dotted underlines mark text read with low confidence. Select a line to find its extracted value. The
+            original is never changed by your review.
+          </p>
+)}
+        </>
+      )}
     </section>
   );
 }
@@ -159,12 +168,30 @@ function ExtractedValues({ v }: { v: VM }) {
               <button onClick={l.onEdit} style={s.link12}>
                 Edit
               </button>
+              {l.canNotStated && (
+                <button onClick={l.onNotStated} style={s.link12}>
+                  Not stated
+                </button>
+              )}
             </span>
           </div>
           <div style={{ padding: '4px 0 0 24px', display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }}>
             <span style={{ color: l.statusColor }}>{l.statusText}</span>
             {l.isLow && <span style={{ color: C.rust }}>{l.reason}</span>}
             {l.isEdited && <span style={{ color: C.muted }}>{l.editedText}</span>}
+            {l.evidence && (
+              <span style={{ color: C.muted, overflowWrap: 'anywhere' }}>
+                {l.evidence}
+                {l.evidencePage > 0 && (
+                  <>
+                    {' '}
+                    <button onClick={l.onShowPage} style={{ fontSize: 12, borderBottom: `1px solid ${C.faint}` }}>
+                      Show page {l.evidencePage}
+                    </button>
+                  </>
+                )}
+              </span>
+            )}
           </div>
           {l.isEditing && (
             <div
@@ -178,24 +205,32 @@ function ExtractedValues({ v }: { v: VM }) {
                 flexWrap: 'wrap',
               }}
             >
-              <label style={{ flex: '1 1 220px', fontSize: 11.5, color: C.muted }}>
-                Corrected value
-                <input
-                  value={l.dValue}
-                  onChange={l.onDValue}
-                  style={{
-                    width: '100%',
-                    padding: '6px 8px',
-                    border: `1px solid ${C.ink}`,
-                    borderRadius: 0,
-                    background: C.field,
-                    fontFamily: MONO,
-                    fontSize: 13,
-                    color: C.ink,
-                    marginTop: 4,
-                  }}
-                />
-              </label>
+              {l.editKind === 'type' ? (
+                <div style={{ flex: '1 1 100%' }}>
+                  <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 4 }}>Corrected value</div>
+                  <Segmented items={l.typeOptions} role="group" aria-label="Document type" />
+                </div>
+              ) : (
+                <label style={{ flex: '1 1 220px', fontSize: 11.5, color: C.muted }}>
+                  Corrected value
+                  <input
+                    type={l.editKind === 'date' ? 'date' : 'text'}
+                    value={l.dValue}
+                    onChange={l.onDValue}
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      border: `1px solid ${C.ink}`,
+                      borderRadius: 0,
+                      background: C.field,
+                      fontFamily: MONO,
+                      fontSize: 13,
+                      color: C.ink,
+                      marginTop: 4,
+                    }}
+                  />
+                </label>
+              )}
               <button
                 onClick={l.onSave}
                 style={{ background: C.ink, color: C.paper, padding: '7px 12px', fontSize: 12.5 }}
@@ -427,6 +462,11 @@ function ExtractedValues({ v }: { v: VM }) {
         }}
       >
         <span style={{ fontSize: 13, color: v.rvPendingColor, maxWidth: 420 }}>{v.rvPendingText}</span>
+        {v.rvError && (
+          <span role="alert" style={{ fontSize: 13, color: C.rust }}>
+            {v.rvError}
+          </span>
+        )}
         <button
           onClick={v.rvContinue}
           disabled={v.rvContinueDisabled}

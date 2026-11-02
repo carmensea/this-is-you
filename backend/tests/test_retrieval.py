@@ -85,6 +85,8 @@ def test_documents_survive_a_restart(data_dir):
     body = make_pdf()
     first = client_for(data_dir)
     doc = upload(first, body, "kept.pdf").json()["document"]
+    first.app.state.extraction.wait_idle()
+    doc = first.get("/api/documents").json()["documents"][0]
     first.app.state.engine.dispose()
 
     second = client_for(data_dir)

@@ -26,8 +26,9 @@ def test_stores_the_exact_original_bytes(client, data_dir):
     assert document["sha256"] == hashlib.sha256(body).hexdigest()
     assert document["byte_size"] == len(body)
     assert document["media_type"] == "application/pdf"
-    assert document["document_type"] == "unclassified"
-    assert document["processing_status"] == "uploaded"
+    assert document["extraction_status"] == "pending"
+    assert document["review_status"] == "not_started"
+    assert document["verification_status"] == "unverified"
     assert document["imported_at"].endswith("Z")
     stored = files_under(data_dir / "originals")
     assert len(stored) == 1

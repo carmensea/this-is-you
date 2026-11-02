@@ -31,7 +31,9 @@ async function start() {
   try {
     const { api, backend } = await connectLocalArchive();
     const archive = await api.loadArchive();
-    show(new AppStore(archive, { view: 'documents', cur: archive.today }, backend));
+    const store = new AppStore(archive, { view: 'documents', cur: archive.today }, backend);
+    show(store);
+    store.watchReading();
   } catch {
     // Never fall back to the demo here: fictional records must not stand in for someone's own.
     root.render(<ArchiveUnavailable onRetry={start} />);

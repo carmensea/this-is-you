@@ -8,9 +8,9 @@ from urllib.parse import unquote
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from .models import Document, ImportEvent, ImportOutcome
+from .models import Document, ExtractionRun, ImportEvent, ImportOutcome, MetadataDecision
 from .storage import OriginalStore, ReceivedFile, UploadRejected, not_a_pdf
 
 # Log ids and sizes only. Filenames and contents are health information and never go in a log.
@@ -61,22 +61,26 @@ def record_upload(sessions: sessionmaker[Session], store: OriginalStore, receive
             duplicate = True
             session.add(ImportEvent(document=document, submitted_filename=filename, outcome=ImportOutcome.DUPLICATE, occurred_at=now))
             session.commit()
-        session.refresh(document, ["imports"])
-        session.expunge_all()
+        document_id = document.id
+    document = get_document(sessions, document_id)
+    assert document is not None
     log.info("document %s: %s, %d bytes", document.id, "duplicate" if duplicate else "stored", received.byte_size)
     return document, duplicate
+
+
+_FULL = (
+    selectinload(Document.imports),
+    selectinload(Document.runs).selectinload(ExtractionRun.proposals),
+    selectinload(Document.decisions).selectinload(MetadataDecision.proposal),
+)
 
 
 def list_documents(sessions: sessionmaker[Session]) -> list[Document]:
     # shortcut: returns every document, which suits one person's archive. Page it if listings slow down.
     with sessions() as session:
-        return list(session.scalars(select(Document).order_by(Document.imported_at.desc(), Document.id)))
+        return list(session.scalars(select(Document).options(*_FULL).order_by(Document.imported_at.desc(), Document.id)))
 
 
 def get_document(sessions: sessionmaker[Session], document_id: str) -> Document | None:
     with sessions() as session:
-        document = session.get(Document, document_id)
-        if document is not None:
-            session.refresh(document, ["imports"])
-            session.expunge_all()
-        return document
+        return session.scalars(select(Document).options(*_FULL).where(Document.id == document_id)).one_or_none()

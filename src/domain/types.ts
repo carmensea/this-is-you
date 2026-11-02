@@ -135,6 +135,41 @@ export interface ArchiveDocument {
   dateUnknown?: boolean;
   /** Where the original file can be fetched. Only real documents have one. */
   contentUrl?: string;
+  /** What was read from a real file, and what a person has decided. Absent in the demo. */
+  review?: DocumentReview;
+}
+
+export type MetadataFieldKey = 'document_type' | 'service_date' | 'provider' | 'report_title';
+export type ExtractionStatus = 'pending' | 'running' | 'extracted' | 'partial' | 'image_only' | 'encrypted' | 'no_text' | 'failed' | 'too_complex';
+
+export interface MetadataProposal {
+  id: number;
+  value: string;
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+  page: number;
+  snippet: string;
+  method: string;
+}
+
+export interface MetadataFieldState {
+  state: 'missing' | 'proposed' | 'confirmed' | 'corrected' | 'not_stated';
+  /** Only ever what a person decided. An inferred value stays under `proposal`. */
+  value: string | null;
+  decidedAt: string | null;
+  proposal: MetadataProposal | null;
+}
+
+export interface DocumentReview {
+  extraction: ExtractionStatus;
+  review: 'not_started' | 'in_progress' | 'completed';
+  verification: 'unverified' | 'partially_verified' | 'verified';
+  pageCount: number | null;
+  pagesRead: number;
+  pagesWithText: number;
+  truncated: boolean;
+  fields: Record<MetadataFieldKey, MetadataFieldState>;
+  possibleDuplicates: string[];
 }
 
 export interface WeightReading {

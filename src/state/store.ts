@@ -2,23 +2,16 @@
 import { addMonths, fLong } from '../domain/dates';
 import { rangeOnly, fmtR } from '../domain/format';
 import { DCATL } from '../domain/vocabulary';
-import type {
-  Archive,
-  ArchiveDocument,
-  HealthEvent,
-  ImportFile,
-  ImportJob,
-  ISODate,
-  LowConfidenceNote,
-  SnapshotMode,
-} from '../domain/types';
-import type { DocumentsBackend } from '../services/archiveApi';
+import type { Archive, ArchiveDocument, HealthEvent, ImportFile, ImportJob, ISODate, LowConfidenceNote, MetadataFieldKey, SnapshotMode } from '../domain/types';
+import { ArchiveRequestError, type DocumentsBackend, type FieldDecision } from '../services/archiveApi';
+import { FIELD_LABEL, FIELD_ORDER, displayValue, isReading } from '../domain/documentReview';
 import { listOnly, simulateProcessing } from '../services/importService';
 import { todayLocal, withDocuments } from '../services/localArchiveApi';
 import { fShort } from '../domain/dates';
 import { fmtSize, kindOf } from '../domain/format';
 
 const MAX_PARALLEL_UPLOADS = 2;
+const READING_POLL_MS = 800;
 
 export type View = 'overview' | 'biomarkers' | 'history' | 'documents' | 'compare' | 'import';
 export const VIEWS: View[] = ['overview', 'biomarkers', 'history', 'documents', 'compare', 'import'];
@@ -29,6 +22,19 @@ export const VIEW_LABELS: Record<View, string> = {
   documents: 'Documents',
   compare: 'Compare',
   import: 'Import',
+};
+
+type ReviewLine = {
+  key: string;
+  mk: string;
+  ri: number;
+  measure: string;
+  value: string;
+  unit: string;
+  ref: string;
+  flag: string;
+  conf: 'low' | 'high';
+  reason: string;
 };
 
 export type ReviewStatus = 'pending' | 'confirmed' | 'excluded';
@@ -102,6 +108,10 @@ export interface AppState {
   rvDraft: ReviewDraft;
   rvStage: 'review' | 'confirm' | 'done';
   rvFilter: 'all' | 'attention' | 'done';
+  /** Why the last decision on a real document could not be saved. */
+  rvError: string | null;
+  /** The page of the original to show, when following a proposal back to its source. */
+  rvSourcePage: number | null;
   accepted: Record<string, boolean>;
   // Compare
   cA: ISODate | null;
@@ -156,6 +166,8 @@ export const initialState: AppState = {
   rvDraft: {},
   rvStage: 'review',
   rvFilter: 'all',
+  rvError: null,
+  rvSourcePage: null,
   accepted: {},
   cA: null,
   cB: null,
@@ -175,6 +187,8 @@ export class AppStore {
   state: AppState;
   private listeners = new Set<() => void>();
   private stopSim: (() => void) | null = null;
+  private readingTimer: ReturnType<typeof setTimeout> | null = null;
+  private uploadsSinceRefresh = false;
   private seq = 0;
 
   constructor(
@@ -249,6 +263,7 @@ export class AppStore {
 
   // Review
   reviewData = (id: string) => {
+    if (this.archive.documentsById[id]?.review) return this.personalReviewData(id);
     const a = this.archive,
       d = a.documentsById[id],
       f = a.lowConfidence[id] || {};
@@ -296,6 +311,31 @@ export class AppStore {
     ];
     return { lines, fields };
   };
+  /** A real document's details as review rows. Status comes only from what a person has decided. */
+  private personalReviewData(id: string) {
+    const review = this.archive.documentsById[id].review!;
+    const fields = FIELD_ORDER.map((key) => {
+      const f = review.fields[key];
+      const shownProposal = f.proposal ? displayValue(key, f.proposal.value) : '';
+      const hasDecision = f.state === 'confirmed' || f.state === 'corrected' || f.state === 'not_stated';
+      return {
+        key,
+        label: FIELD_LABEL[key],
+        value:
+          f.state === 'not_stated'
+            ? 'Not stated in the document'
+            : f.value
+              ? displayValue(key, f.value)
+              : shownProposal || 'Nothing proposed',
+        conf: !f.proposal || f.proposal.confidence === 'low' ? ('low' as const) : ('high' as const),
+        reason: f.proposal?.reason ?? '',
+        status: hasDecision ? 'confirmed' : 'pending',
+        edited: f.state === 'corrected',
+      };
+    });
+    return { lines: [] as ReviewLine[], fields };
+  }
+
   patchReview = (id: string, grp: keyof ReviewRecord, key: string, patch: ReviewPatch) => {
     this.setState((st) => {
       const c: ReviewRecord = st.rv[id] || { lines: {}, fields: {} };
@@ -303,7 +343,16 @@ export class AppStore {
     });
   };
   openReview = (id: string, extra: Partial<AppState> = {}) =>
-    this.go('import', { rvDoc: id, rvStage: 'review', rvLine: null, rvEdit: null, rvFilter: 'all', ...extra });
+    this.go('import', {
+      rvDoc: id,
+      rvStage: 'review',
+      rvLine: null,
+      rvEdit: null,
+      rvFilter: 'all',
+      rvError: null,
+      rvSourcePage: null,
+      ...extra,
+    });
 
   // Simulated import
   addFiles = (list: ImportFile[]) => {
@@ -366,7 +415,7 @@ export class AppStore {
             pct: 100,
             done: true,
             documentId: result.document.id,
-            result: 'Stored unchanged on this computer. Its contents have not been read.',
+            result: 'Stored unchanged on this computer.',
           });
         } else if (result.kind === 'duplicate') {
           const d = result.document;
@@ -385,7 +434,11 @@ export class AppStore {
             result: result.message,
           });
         }
-        if (result.kind === 'stored') await this.refreshDocuments(backend);
+        if (result.kind === 'stored') {
+          await this.refreshDocuments(backend);
+          this.uploadsSinceRefresh = true;
+          this.watchReading();
+        }
       }
     };
     return Promise.all(Array.from({ length: Math.min(MAX_PARALLEL_UPLOADS, queue.length) }, work));
@@ -403,4 +456,55 @@ export class AppStore {
       // The upload itself succeeded. The list catches up on the next refresh or page load.
     }
   }
+
+  // Decisions on real documents. The service keeps them; this only shows what it confirms it saved.
+  private replaceDocument(document: ArchiveDocument) {
+    const documents = this.archive.documents.map((d) => (d.id === document.id ? document : d));
+    this.archive = withDocuments(this.archive, documents);
+  }
+
+  private async saving(request: (backend: DocumentsBackend) => Promise<ArchiveDocument>): Promise<boolean> {
+    if (!this.backend) return false;
+    try {
+      this.replaceDocument(await request(this.backend));
+      this.setState({ rvError: null });
+      return true;
+    } catch (problem) {
+      const message = problem instanceof ArchiveRequestError ? problem.message : 'This could not be saved.';
+      this.setState({ rvError: message });
+      // A stale proposal means the screen is behind. Catch up so the person sees the new value.
+      if (problem instanceof ArchiveRequestError && problem.code === 'stale_proposal')
+        await this.refreshDocuments(this.backend);
+      return false;
+    }
+  }
+
+  decideField = (id: string, field: MetadataFieldKey, decision: FieldDecision) =>
+    this.saving((backend) => backend.decide(id, field, decision));
+
+  completeReview = async (id: string) => {
+    if (await this.saving((backend) => backend.setReview(id, true))) {
+      this.setState({ rvStage: 'done' });
+      window.scrollTo(0, 0);
+    }
+  };
+
+  readAgain = async (id: string) => {
+    if (await this.saving((backend) => backend.readAgain(id))) this.watchReading();
+  };
+
+  /** Checks back while any document is still being read. */
+  watchReading = () => {
+    const backend = this.backend;
+    if (!backend || this.readingTimer) return;
+    const check = async () => {
+      this.readingTimer = null;
+      await this.refreshDocuments(backend);
+      if (this.archive.documents.some(isReading)) this.watchReading();
+    };
+    if (this.archive.documents.some(isReading) || this.uploadsSinceRefresh) {
+      this.uploadsSinceRefresh = false;
+      this.readingTimer = setTimeout(check, READING_POLL_MS);
+    }
+  };
 }

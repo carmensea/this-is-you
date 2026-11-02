@@ -2,9 +2,17 @@ import type { InputChange } from './events';
 import { fLong, fShort } from '../domain/dates';
 import { fmtR, plural, rangeOnly } from '../domain/format';
 import { DCATL, DCATS, STATUS, TYPE_LABEL } from '../domain/vocabulary';
+import { EXTRACTION_LABEL, FIELD_LABEL, FIELD_ORDER, REVIEW_LABEL, VERIFICATION_LABEL, canReview, describeField, isReading, proposalCount, typeLabel } from '../domain/documentReview';
 import { C } from '../theme';
 import type { AppStore } from '../state/store';
 import type { ArchiveDocument, DocumentStatus } from '../domain/types';
+
+const REVIEW_STATUS_NOTE: Record<DocumentStatus, string> = {
+  uploaded: 'Original stored.',
+  parsed: 'Details proposed from the text, not yet checked against the original.',
+  reviewed: 'A person has reviewed the details.',
+  unsupported: 'Original stored. Its text cannot be read in this version.',
+};
 
 type DocumentRow =
   | { isYear: true; isDoc: false; year: string; count: string }
@@ -68,17 +76,25 @@ export function documentsVM(store: AppStore) {
         date: d.dateLabel || fShort(d.date),
         title: d.title,
         sub: d.source + ' · ' + d.format,
-        type: DCATL[d.cat],
+        type: d.review ? typeLabel(d) : DCATL[d.cat],
         statusLabel: STATUS[k].label,
         statusColor: STATUS[k].color,
-        extracted: d.n
-          ? plural(d.n, 'value')
-          : d.rows
-            ? d.rows + ' rows'
-            : k === 'reviewed' || k === 'parsed'
-              ? '1 record'
-              : 'None',
-        note: d.dup ? 'Duplicate, set aside' : '',
+        extracted: d.review
+          ? isReading(d)
+            ? 'Reading'
+            : d.review.review === 'completed'
+              ? 'Reviewed'
+              : proposalCount(d.review)
+                ? proposalCount(d.review) + ' proposed'
+                : 'None'
+          : d.n
+            ? plural(d.n, 'value')
+            : d.rows
+              ? d.rows + ' rows'
+              : k === 'reviewed' || k === 'parsed'
+                ? '1 record'
+                : 'None',
+        note: d.dup ? 'Duplicate, set aside' : d.review?.possibleDuplicates.length ? 'Possible duplicate' : '',
         bg: sel && sel.id === d.id ? '#E6E1D6' : 'transparent',
         current: !!(sel && sel.id === d.id),
         snapTag: inRec(d) ? '' : 'Added after snapshot',
@@ -169,7 +185,7 @@ export function documentsVM(store: AppStore) {
       ddFile: sel.file,
       ddStatusLabel: meta.label,
       ddStatusColor: meta.color,
-      ddStatusDesc: meta.desc,
+      ddStatusDesc: sel.review ? VERIFICATION_LABEL[sel.review.verification] + '. ' + REVIEW_STATUS_NOTE[k] : meta.desc,
       ddKnown: known
         ? 'In the record by the snapshot date, ' + fShort(cur) + '.'
         : 'Not yet in the record on the snapshot date, ' + fShort(cur) + '. Documented ' + fShort(sel.documented) + '.',
@@ -177,36 +193,65 @@ export function documentsVM(store: AppStore) {
       ddContentUrl: sel.contentUrl ?? null,
       ddHasNote: !!sel.note,
       ddNote: sel.note || '',
-      ddFields: [
-        { k: 'Document type', v: DCATL[sel.cat] },
-        {
-          k: sel.cat === 'lab' ? 'Collected' : 'Date of service',
-          v: sel.dateUnknown ? 'Not recorded' : sel.dateLabel || fLong(sel.date),
-        },
-        {
-          k: 'Documented',
-          v: sel.dateUnknown ? 'Not recorded' : sel.dateLabel ? 'Exported 27 Oct 2026' : fLong(sel.documented),
-        },
-        { k: 'Source', v: sel.source },
-        { k: sel.cat === 'lab' ? 'Ordered by' : 'Clinician', v: sel.who || 'Not stated' },
-        { k: 'Format', v: sel.format },
-        { k: 'Pages', v: sel.contentUrl ? 'Not read' : sel.pages ? String(sel.pages) : 'Not applicable' },
-        { k: 'File size', v: sel.size },
-        { k: 'Imported', v: sel.via + ', ' + sel.imported },
-        { k: 'Checksum, SHA-256', v: sel.contentUrl ? sel.hash : sel.hash.slice(0, 16) + '…' },
-        { k: 'Original file', v: 'Stored unchanged since import' },
-        {
-          k: 'Extracted',
-          v:
-            lines.length && !sel.dup
-              ? plural(lines.length, 'measurement')
-              : sel.rows
-                ? sel.rows + ' weight readings'
-                : k === 'reviewed' || k === 'parsed'
-                  ? '1 history record'
-                  : 'Nothing',
-        },
-      ],
+      ddReviewLabel: sel.review
+        ? sel.review.review === 'completed'
+          ? 'Change reviewed details'
+          : 'Review details'
+        : 'Review extracted values',
+      ddDupLabel: sel.review ? 'Open the possible duplicate' : 'Open the original copy',
+      ddCanReread: sel.review?.extraction === 'failed' || sel.review?.extraction === 'too_complex',
+      ddReread: () => void store.readAgain(sel.id),
+      ddFields: sel.review
+        ? [
+            ...FIELD_ORDER.map((key) => ({ k: FIELD_LABEL[key], v: describeField(key, sel.review!.fields[key]) })),
+            { k: 'Reading', v: EXTRACTION_LABEL[sel.review.extraction] },
+            { k: 'Review', v: REVIEW_LABEL[sel.review.review] },
+            { k: 'Verification', v: VERIFICATION_LABEL[sel.review.verification] },
+            {
+              k: 'Pages',
+              v: sel.review.pageCount
+                ? sel.review.pagesRead < sel.review.pageCount
+                  ? `${sel.review.pagesRead} of ${sel.review.pageCount} read`
+                  : String(sel.review.pageCount)
+                : 'Not known',
+            },
+            { k: 'Format', v: sel.format },
+            { k: 'File size', v: sel.size },
+            { k: 'Imported', v: sel.via + ', ' + sel.imported },
+            { k: 'Checksum, SHA-256', v: sel.hash },
+            { k: 'Original file', v: 'Stored unchanged since import' },
+            { k: 'Original filename', v: sel.file },
+          ]
+        : [
+            { k: 'Document type', v: DCATL[sel.cat] },
+            {
+              k: sel.cat === 'lab' ? 'Collected' : 'Date of service',
+              v: sel.dateLabel || fLong(sel.date),
+            },
+            {
+              k: 'Documented',
+              v: sel.dateLabel ? 'Exported 27 Oct 2026' : fLong(sel.documented),
+            },
+            { k: 'Source', v: sel.source },
+            { k: sel.cat === 'lab' ? 'Ordered by' : 'Clinician', v: sel.who || 'Not stated' },
+            { k: 'Format', v: sel.format },
+            { k: 'Pages', v: sel.pages ? String(sel.pages) : 'Not applicable' },
+            { k: 'File size', v: sel.size },
+            { k: 'Imported', v: sel.via + ', ' + sel.imported },
+            { k: 'Checksum, SHA-256', v: sel.hash.slice(0, 16) + '…' },
+            { k: 'Original file', v: 'Stored unchanged since import' },
+            {
+              k: 'Extracted',
+              v:
+                lines.length && !sel.dup
+                  ? plural(lines.length, 'measurement')
+                  : sel.rows
+                    ? sel.rows + ' weight readings'
+                    : k === 'reviewed' || k === 'parsed'
+                      ? '1 history record'
+                      : 'Nothing',
+            },
+          ],
       ddHasEvent: !!ev,
       ddShowHistory: () => {
         if (!ev) return;
@@ -224,21 +269,11 @@ export function documentsVM(store: AppStore) {
         window.scrollTo(0, 0);
       },
       ddSnap: () => store.setCur(mode === 'known' ? sel.documented : sel.date),
-      ddCanReview: k === 'parsed',
-      ddReview: () => {
-        store.setState({
-          view: 'import',
-          rvDoc: sel.id,
-          rvStage: 'review',
-          rvLine: null,
-          rvEdit: null,
-          rvFilter: 'all',
-          returnTo: { view: 'documents', y: 0 },
-        });
-        window.scrollTo(0, 0);
-      },
-      ddHasDup: !!sel.dup,
-      ddOpenDup: () => store.setState({ dSel: sel.dup, dPage: 0, dHL: null }),
+      ddCanReview: sel.review ? canReview(sel) : k === 'parsed',
+      ddReview: () => store.openReview(sel.id, { returnTo: { view: 'documents', y: 0 } }),
+      ddHasDup: !!sel.dup || !!sel.review?.possibleDuplicates.length,
+      ddOpenDup: () =>
+        store.setState({ dSel: sel.dup ?? sel.review?.possibleDuplicates[0] ?? null, dPage: 0, dHL: null }),
       ddMultiPage: pages > 1,
       ddPageText: 'Page ' + (page + 1) + ' of ' + pages,
       ddPrev: () => store.setState({ dPage: Math.max(0, page - 1) }),

@@ -19,8 +19,8 @@ export function NoRecordsYet() {
       <p
         style={{ margin: '18px 0 0', fontSize: 14, lineHeight: 1.55, color: C.ink2, maxWidth: 560, textWrap: 'pretty' }}
       >
-        This screen shows records extracted from your documents. This version stores your original files but does not
-        read them yet, so there is nothing to show here.
+        This screen shows records extracted from your documents. This version reads basic details such as a document's
+        type and date, but not the results inside it, so there is nothing to show here yet.
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', marginTop: 16 }}>
         <button onClick={() => store.go('documents')} style={s.link13}>

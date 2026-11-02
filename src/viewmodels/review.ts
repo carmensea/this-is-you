@@ -1,13 +1,72 @@
 import type { InputChange } from './events';
 import { fLong, fShort } from '../domain/dates';
 import { plural } from '../domain/format';
-import { DCATL } from '../domain/vocabulary';
+import { DCATL, DCATS } from '../domain/vocabulary';
+import { EXTRACTION_LABEL, VERIFICATION_LABEL, displayValue } from '../domain/documentReview';
+import type { DocumentReview, MetadataFieldKey } from '../domain/types';
+import type { SegmentItem } from '../components/controls';
 import { C } from '../theme';
 import type { AppState, AppStore } from '../state/store';
 
 export type ReviewVM = NonNullable<ReturnType<typeof reviewVM>>;
 
 type Item = { status: string; conf: string; edited: boolean };
+
+function rawValue(real: DocumentReview, key: MetadataFieldKey): string {
+  const f = real.fields[key];
+  return f.value ?? f.proposal?.value ?? '';
+}
+
+function realEditedText(real: DocumentReview, key: MetadataFieldKey): string {
+  const f = real.fields[key];
+  return f.proposal
+    ? `Read from the document as ${displayValue(key, f.proposal.value)}. Your correction is kept beside it.`
+    : 'Entered by you. Nothing was read from the document.';
+}
+
+function realStatusText(real: DocumentReview, key: MetadataFieldKey): string {
+  const f = real.fields[key];
+  if (f.state === 'confirmed') return 'Confirmed by you';
+  if (f.state === 'corrected') return 'Corrected by you';
+  if (f.state === 'not_stated') return 'You marked this as not stated in the document';
+  if (!f.proposal) return 'Nothing was found. Enter it, or mark it as not stated.';
+  return `Proposed, not verified · ${f.proposal.confidence} confidence`;
+}
+
+/** What only a real document's detail has: its evidence, its editor, and "not stated". */
+function fieldExtras(store: AppStore, id: string, key: string, real: DocumentReview | undefined) {
+  const none = {
+    evidence: '',
+    evidencePage: 0,
+    onShowPage: () => {},
+    editKind: 'text' as 'text' | 'date' | 'type',
+    typeOptions: [] as SegmentItem[],
+    canNotStated: false,
+    onNotStated: () => {},
+  };
+  if (!real) return none;
+  const k = key as MetadataFieldKey;
+  const f = real.fields[k];
+  const draft = store.state.rvDraft.value ?? '';
+  return {
+    evidence: f.proposal
+      ? (f.proposal.snippet ? `Source, page ${f.proposal.page}: "${f.proposal.snippet}"` : 'Source: file properties') +
+        ` · ${f.proposal.method}`
+      : '',
+    evidencePage: f.proposal?.snippet ? f.proposal.page : 0,
+    onShowPage: () => store.setState({ rvSourcePage: f.proposal?.page ?? null }),
+    editKind: k === 'service_date' ? ('date' as const) : k === 'document_type' ? ('type' as const) : ('text' as const),
+    typeOptions: DCATS.map(([value, label]) => ({
+      label: DCATL[value] ?? label,
+      onClick: () => store.setState({ rvDraft: { value } }),
+      pressed: draft === value,
+      bg: draft === value ? C.ink : C.paper,
+      fg: draft === value ? C.paper : C.ink,
+    })),
+    canNotStated: f.state !== 'not_stated',
+    onNotStated: () => store.decideField(id, k, { action: 'not_stated' }),
+  };
+}
 
 export function reviewVM(store: AppStore) {
   const archive = store.archive,
@@ -68,6 +127,7 @@ export function reviewVM(store: AppStore) {
         : l.status !== 'pending'),
   );
   const editKey = s.rvEdit;
+  const real = d.review;
   const out = {
     rvIsReview: s.rvStage === 'review',
     rvIsConfirm: s.rvStage === 'confirm',
@@ -76,29 +136,34 @@ export function reviewVM(store: AppStore) {
       store.setState({ rvDoc: null, rvEdit: null });
       window.scrollTo(0, 0);
     },
+    rvIsReal: !!real,
+    rvContentUrl: d.contentUrl ? d.contentUrl + (s.rvSourcePage ? `#page=${s.rvSourcePage}` : '') : null,
+    rvError: real ? s.rvError : null,
     rvTitle: d.title,
-    rvMeta:
-      d.source +
-      ' · ' +
-      (d.cat === 'lab' ? 'Collected ' : '') +
-      fLong(d.date) +
-      ' · ' +
-      d.format +
-      ' · imported ' +
-      d.imported,
+    rvMeta: real
+      ? `${d.file} · imported ${d.imported} · ${real.pageCount ? plural(real.pageCount, 'page') : 'pages not read'} · ${EXTRACTION_LABEL[real.extraction]}`
+      : d.source +
+        ' · ' +
+        (d.cat === 'lab' ? 'Collected ' : '') +
+        fLong(d.date) +
+        ' · ' +
+        d.format +
+        ' · imported ' +
+        d.imported,
     rvFile: d.file + (d.pages ? ' · ' + plural(d.pages, 'page') : ''),
-    rvProgress:
-      all.length -
-      pending +
-      ' of ' +
-      all.length +
-      ' items resolved · ' +
-      conf +
-      ' values confirmed · ' +
-      edt +
-      ' corrected · ' +
-      exc +
-      ' excluded',
+    rvProgress: real
+      ? `${all.length - pending} of ${all.length} details resolved · ${edt} corrected · ${VERIFICATION_LABEL[real.verification]}`
+      : all.length -
+        pending +
+        ' of ' +
+        all.length +
+        ' items resolved · ' +
+        conf +
+        ' values confirmed · ' +
+        edt +
+        ' corrected · ' +
+        exc +
+        ' excluded',
     rvPctC: String(
       all.length ? Math.round((all.filter((l) => l.status === 'confirmed').length / all.length) * 100) : 0,
     ),
@@ -124,24 +189,43 @@ export function reviewVM(store: AppStore) {
     })),
     rvFields: F.map((l) =>
       Object.assign(
+        fieldExtras(store, id, l.key, real),
         {
           label: l.label,
           value: l.value,
           isLow: l.conf === 'low' && !!l.reason,
           reason: l.reason,
-          statusText: stText(l),
+          statusText: real ? realStatusText(real, l.key as MetadataFieldKey) : stText(l),
           statusColor: stColor(l),
-          canConfirm: l.status !== 'confirmed',
+          canConfirm: l.status !== 'confirmed' && (!real || !!real.fields[l.key as MetadataFieldKey].proposal),
           isEditing: editKey === 'f:' + l.key,
           dValue: dr.value == null ? '' : dr.value,
           onDValue: (e: InputChange) =>
             store.setState({ rvDraft: Object.assign({}, store.state.rvDraft, { value: e.target.value }) }),
           isEdited: l.edited,
-          editedText: 'Extracted as ' + l.orig.value + '.',
-          onConfirm: () => store.patchReview(id, 'fields', l.key, { status: 'confirmed' }),
-          onEdit: () => store.setState({ rvEdit: 'f:' + l.key, rvDraft: { value: l.value } }),
-          onSave: () => {
+          editedText: real ? realEditedText(real, l.key as MetadataFieldKey) : 'Extracted as ' + l.orig.value + '.',
+          onConfirm: () => {
+            const proposal = real?.fields[l.key as MetadataFieldKey].proposal;
+            if (proposal)
+              store.decideField(id, l.key as MetadataFieldKey, { action: 'confirmed', proposal_id: proposal.id });
+            else store.patchReview(id, 'fields', l.key, { status: 'confirmed' });
+          },
+          onEdit: () =>
+            store.setState({
+              rvEdit: 'f:' + l.key,
+              rvError: null,
+              rvDraft: { value: real ? rawValue(real, l.key as MetadataFieldKey) : l.value },
+            }),
+          onSave: async () => {
             const v = (store.state.rvDraft || {}).value;
+            if (real) {
+              const saved = await store.decideField(id, l.key as MetadataFieldKey, {
+                action: 'corrected',
+                value: v ?? '',
+              });
+              if (saved) store.setState({ rvEdit: null });
+              return;
+            }
             store.patchReview(id, 'fields', l.key, { status: 'confirmed', value: v, edited: v !== l.orig.value });
             store.setState({ rvEdit: null });
           },
@@ -259,8 +343,13 @@ export function reviewVM(store: AppStore) {
         return { rv };
       }),
     rvPendingText: pending
-      ? plural(pending, 'item') + ' still to resolve. Confirm, correct or exclude each one.'
-      : 'Everything is resolved. Nothing is added to the archive until you accept on the next step.',
+      ? plural(pending, 'item') +
+        (real
+          ? ' still to resolve. Confirm, correct or mark each one as not stated.'
+          : ' still to resolve. Confirm, correct or exclude each one.')
+      : real
+        ? 'Every detail is decided, and your decisions are saved. The next step marks the review as complete.'
+        : 'Everything is resolved. Nothing is added to the archive until you accept on the next step.',
     rvPendingColor: pending ? C.rust : C.green,
     rvContinueDisabled: pending > 0,
     rvContinueBg: pending ? C.sunk : C.ink,
@@ -272,22 +361,25 @@ export function reviewVM(store: AppStore) {
       }
     },
     rvBackToReview: () => store.setState({ rvStage: 'review' }),
-    rvSumAdd: L.length
-      ? plural(conf, 'measurement') + ' will be added to the archive as reviewed, each linked to this document.'
-      : 'The document details will be marked as reviewed.',
+    rvSumAdd: real
+      ? 'These details will be saved as reviewed, each linked to this document. Nothing is changed in the original file.'
+      : L.length
+        ? plural(conf, 'measurement') + ' will be added to the archive as reviewed, each linked to this document.'
+        : 'The document details will be marked as reviewed.',
     rvEdits: all
       .filter((l) => l.edited)
       .map((l) => ({
-        text:
-          (l.measure || l.label) +
-          ': extracted as ' +
-          l.orig.value +
-          (l.orig.unit ? ' ' + l.orig.unit : '') +
-          ', corrected to ' +
-          l.value +
-          (l.unit ? ' ' + l.unit : '') +
-          (l.ref && l.orig.ref !== l.ref ? ', range ' + l.ref : '') +
-          '.',
+        text: real
+          ? `${l.label}: ${realEditedText(real, l.key as MetadataFieldKey)}`
+          : (l.measure || l.label) +
+            ': extracted as ' +
+            l.orig.value +
+            (l.orig.unit ? ' ' + l.orig.unit : '') +
+            ', corrected to ' +
+            l.value +
+            (l.unit ? ' ' + l.unit : '') +
+            (l.ref && l.orig.ref !== l.ref ? ', range ' + l.ref : '') +
+            '.',
       })),
     rvHasEdits: edt > 0,
     rvExcl: L.filter((l) => l.status === 'excluded').map((l) => ({
@@ -296,6 +388,10 @@ export function reviewVM(store: AppStore) {
     rvHasExcl: exc > 0,
     rvAcceptLabel: L.length ? 'Accept ' + plural(conf, 'value') + ' into the archive' : 'Mark document as reviewed',
     rvAccept: () => {
+      if (real) {
+        void store.completeReview(id);
+        return;
+      }
       store.setState((st) => ({ accepted: Object.assign({}, st.accepted, { [id]: true }), rvStage: 'done' }));
       window.scrollTo(0, 0);
     },

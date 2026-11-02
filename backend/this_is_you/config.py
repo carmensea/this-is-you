@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from .extraction.runner import Limits
+
 DEFAULT_MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 
@@ -21,6 +23,7 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    extraction_limits: Limits = Limits()
 
     @property
     def database_path(self) -> Path:

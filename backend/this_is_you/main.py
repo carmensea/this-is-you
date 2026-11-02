@@ -8,6 +8,8 @@ from sqlalchemy.orm import sessionmaker
 from .api.documents import router as documents_router
 from .config import Settings, load_settings, validate
 from .db import make_engine, migrate
+from .extraction.queue import ExtractionQueue
+from .metadata import documents_to_resume, process_document
 from .schemas import Status
 from .security import LocalOnlyMiddleware
 from .storage import OriginalStore, UploadRejected
@@ -28,6 +30,9 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.store = store
     app.state.engine = engine
     app.state.sessions = sessionmaker(engine, expire_on_commit=False)
+    app.state.extraction = ExtractionQueue(lambda document_id: process_document(app.state.sessions, store, settings.extraction_limits, document_id))
+    for document_id in documents_to_resume(app.state.sessions):
+        app.state.extraction.enqueue(document_id)
     app.add_middleware(LocalOnlyMiddleware)
     app.include_router(documents_router)
 
