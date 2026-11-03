@@ -2,7 +2,7 @@
 
 This runs This Is You on an always-on Ubuntu Server machine, reachable only from your own devices through Tailscale. Nothing is published to the LAN or the internet.
 
-**Status:** tested on a real Ubuntu 24.04 ARM64 virtual machine with a stand-in proxy and fictional records. **Real Tailscale, real disks and a real phone have not been tested.** [Section 9](#9-what-must-be-tested-on-the-real-machine) lists what to check before trusting it with your records. Results: [docs/reports/2026-11-03-linux-verification.md](reports/2026-11-03-linux-verification.md).
+**Status: not yet verified on the actual mini PC.** It has been tested only on a real Ubuntu 24.04 ARM64 virtual machine, with a stand-in proxy and fictional records. **Real Tailscale, x86_64 hardware, real disks and a real phone have not been tested.** [Section 9](#9-what-must-be-tested-on-the-real-machine) lists what to check before trusting it with your records. Results: [docs/reports/2026-11-03-linux-verification.md](reports/2026-11-03-linux-verification.md).
 
 ## 1. How it fits together
 

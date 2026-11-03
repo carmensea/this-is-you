@@ -51,6 +51,8 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 
 To run it on an always-on Linux machine, reached privately through Tailscale, see **[docs/deployment.md](docs/deployment.md)**: Docker Compose, encrypted backups, updates, disaster recovery, and what must be checked on real hardware. Tested results are in [docs/reports/](docs/reports/).
 
+**Not yet verified on the actual mini PC.** So far this has run only on an Ubuntu 24.04 ARM64 virtual machine with a stand-in proxy and fictional records. Real Tailscale and x86_64 hardware testing are still outstanding, so do not trust it with real records until that checklist passes.
+
 ## Where your documents live
 
 Outside this repository, in a folder only your user account can read:
