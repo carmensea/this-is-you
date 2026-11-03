@@ -317,3 +317,27 @@ class IdentityProfile(Base):
     date_of_birth: Mapped[str | None] = mapped_column(String(10))
     previous_names: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class AuthCredential(Base):
+    """One row at most: the salted hash of the passphrase. Not copied into backups."""
+
+    __tablename__ = "auth_credential"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    salt: Mapped[str] = mapped_column(String(64), nullable=False)
+    derived: Mapped[str] = mapped_column(String(128), nullable=False)
+    n: Mapped[int] = mapped_column(Integer, nullable=False)
+    r: Mapped[int] = mapped_column(Integer, nullable=False)
+    p: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class AuthSession(Base):
+    """A signed-in device. Only a hash of its token is kept. Not copied into backups."""
+
+    __tablename__ = "auth_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_seen_at: Mapped[int] = mapped_column(Integer, nullable=False)

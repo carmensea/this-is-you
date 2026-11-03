@@ -160,7 +160,7 @@ def test_the_reader_is_never_given_the_details(client, monkeypatch):
 
     seen: list[list[str]] = []
     real = runner.run_command
-    monkeypatch.setattr(runner, "run_command", lambda command, seconds: (seen.append(command), real(command, seconds))[1])
+    monkeypatch.setattr(runner, "run_command", lambda command, seconds, document: (seen.append(command), real(command, seconds, document))[1])
     set_identity(client, full_name="Avery Uniquename")
     upload(client, pdfs.text_pdf(pdfs.LAB_REPORT), "a.pdf")
     client.app.state.extraction.wait_idle()

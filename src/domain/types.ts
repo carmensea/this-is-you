@@ -293,15 +293,23 @@ export interface ImportReportItem {
 
 export interface BackupEntry {
   name: string;
-  state: 'complete' | 'incomplete' | 'damaged';
+  state: 'complete' | 'incomplete' | 'damaged' | 'encrypted';
   created_at: string | null;
   documents: number | null;
   bytes: number | null;
   last_check: { checked_at: string; ok: boolean; problems: string[] } | null;
 }
 
+export interface ArchiveHealth {
+  recovered: number;
+  set_aside: number;
+  missing: number;
+  reader_isolation: 'sandboxed' | 'basic';
+}
+
 export interface BackupListing {
   location: string;
+  same_drive: boolean;
   backups: BackupEntry[];
   running: { kind: 'backup' | 'check'; name?: string; done: number; total: number } | null;
   last_result: { kind: 'backup' | 'check'; name: string | null; ok: boolean; problems: string[] } | null;

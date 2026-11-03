@@ -7,6 +7,7 @@ import { HistoryScreen } from './screens/HistoryScreen';
 import { ImportScreen } from './screens/ImportScreen';
 import { OverviewScreen } from './screens/OverviewScreen';
 import { ReviewScreen } from './screens/ReviewScreen';
+import { SignIn } from './screens/SignIn';
 import { useStore } from './state/useStore';
 import { type View } from './state/store';
 import { viewFromHash } from './services/archiveMode';
@@ -19,7 +20,7 @@ const NEEDS_RECORDS: View[] = ['overview', 'biomarkers', 'history', 'compare'];
 
 export function App() {
   const store = useStore();
-  const { view, rvDoc, notice, archiveStale } = store.state;
+  const { view, rvDoc, notice, archiveStale, signedOut } = store.state;
 
   // Keeps the address bar and the back button in step with the current screen.
   useEffect(() => {
@@ -36,6 +37,8 @@ export function App() {
     if (viewFromHash() !== store.state.view) window.location.hash = '/' + store.state.view;
   }, [store, view]);
 
+  // Replaces the screens without leaving this page, so an import in progress can carry on after signing back in.
+  if (signedOut) return <SignIn expired onSignedIn={store.afterSignIn} />;
   const v = shellVM(store);
   const isDemo = store.archive.kind === 'demo';
   const hasRecords = isDemo || store.archive.markers.length > 0;

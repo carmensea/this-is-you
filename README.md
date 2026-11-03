@@ -23,6 +23,7 @@ npm run backend:setup     # once: creates backend/.venv and installs exact depen
 Then, in two terminals:
 
 ```sh
+npm run backend -- set-passphrase    # once: your archive stays closed until it has one
 npm run backend           # the archive service, http://127.0.0.1:8000
 npm run dev               # the app, http://127.0.0.1:5180
 ```
@@ -40,6 +41,7 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 | `npm run build` | Typecheck, then production build to `dist/` |
 | `npm run perf -- --label X` | Browser timings and checks on synthetic archives, about 30 minutes, written to `tools/perf/results/` (needs Chrome and a prior build) |
 | `npm run perf:compare -- <old dist> <new dist>` | Alternates two builds to judge a change, about 15 minutes |
+| `npm run readiness:dev` | Sign in, import and sign out through the real dev server, on a fictional archive. About 1 minute. |
 | `npm run readiness -- [--scale 1]` | The whole import, crash, backup and restore workflow in Chrome, on a messy fictional folder. About 4 minutes at scale 1. Needs a prior build. |
 
 ## Where your documents live
@@ -88,7 +90,7 @@ Choose or drop a folder on the Import screen. Nested folders are included, and f
 - **To continue,** choose the same folder again. Finished files are not sent again, and identical bytes are one document, however many times they arrive. A file's report line changes in the same database transaction as its document, so the two cannot disagree after a crash.
 - **Stored, read and verified are separate.** A scanned file is stored and not read. Nothing is verified by importing.
 - **Retry failures** reads failed files again. Files that never arrived need the folder chosen again after a page reload, since the browser no longer has access to them.
-- Your files are only read, never changed. **Hide this report** takes a report off the screen and keeps its rows.
+- Your files are only read, never changed. **Remove this report** deletes the report and its folder paths from the archive after asking. The documents stay, and older backups still hold the report.
 
 Limits: the screen lists up to 500 lines of a report at once, so use the filters past that. Folder paths are stored in the archive and its backups, and folder names can be sensitive. A file stored just as the service crashed, and never sent again, stays in `originals/` unlisted and is not backed up.
 
@@ -112,6 +114,8 @@ A flag never refuses, removes or verifies anything. Only English labels are reco
 npm run backend -- backup [--to FOLDER]     # Write one, then check it
 npm run backend -- verify BACKUP            # Check every byte and relationship. Changes nothing.
 npm run backend -- restore BACKUP --to NEW_FOLDER
+npm run backend -- backup --encrypt --to FOLDER   # One encrypted file. Asks for a passphrase of its own.
+npm run backend -- prune [--keep 3] [--include-replaced] [--yes]   # Lists old backups and leftovers. Removes them only with --yes.
 ```
 
 - **What is in one:** a consistent snapshot of the database, which holds your metadata, decisions, results, correction history, import reports and identity details, plus every original, and a manifest of hashes, record counts and version numbers.
@@ -120,7 +124,11 @@ npm run backend -- restore BACKUP --to NEW_FOLDER
 - **Damage is caught:** a changed, missing or extra file, a damaged database, broken relationships, an edited manifest, or a backup from a newer version. Nothing is restored from a backup that fails.
 - **Your archive is protected.** Restoring into a folder that holds files needs its exact name typed, refuses while a service is using it, checks the new copy completely first, and moves the old folder to `*.replaced-*` instead of deleting it. To start using a restored folder, point `THIS_IS_YOU_DATA_DIR` at it.
 
-**Not covered.** Backups are not encrypted. They stay on this drive until you copy them elsewhere or set `THIS_IS_YOU_BACKUP_DIR`. Nothing removes old backups or `*.replaced-*` folders, and they hold everything your archive does. The manifest's checksum catches damage, not forgery: someone who can write to the folder can rewrite it.
+- **Encrypted backups** seal a checked backup into one file. Changing, reordering, removing or adding anything stops it opening. The destination never holds a plain copy, even after a crash. `verify` and `restore` accept the file and ask for its passphrase. **Lose that passphrase and the backup is gone, by design.**
+- **Other drives:** the app says when backups share the archive's drive. A destination whose parent folder is missing is refused, so an unplugged drive never becomes a surprise folder on this one.
+- **Sign-in details are never in a backup.** A restored archive stays closed until you run `set-passphrase` for it.
+
+**Not covered.** **Back up now** writes a plain, unencrypted backup. Encrypted ones are command line only, so nothing makes them on a schedule yet. Old backups go only when you run `prune`. An encrypted backup needs room for a full plain copy in the archive folder while it is built.
 
 ## Reading, reviewing and verifying
 
@@ -175,7 +183,7 @@ Each document has three separate statuses:
 
 **Untrusted files.** PDFs are read by `pypdf` in a separate short-lived process, never in the service itself. That process has a wall-clock limit (45 seconds), a CPU limit (30 seconds), a memory limit (1 GB), no write access to files, no core dumps, an empty environment, and Python's network functions disabled. It reads at most 30 pages and 400,000 characters. Only a small summary comes back, which the service checks before saving: the full text never leaves the process and is not stored. Its error output is discarded so that document text cannot reach a log.
 
-**Limits of that isolation.** This is containment, not a full sandbox. The network block is at the Python level rather than enforced by the operating system, and the reader can still read other files your user account can read. A serious flaw in Python or `pypdf` could get past these limits, so keep dependencies updated.
+**Sandbox.** The reader receives the document as an open file and is never told a path. An operating-system sandbox blocks network, writing, other programs, and reading anything but Python and system libraries (`sandbox-exec` on macOS, `bubblewrap` on Linux). Without one, it runs with the limits above only and says so in `doctor`, the log and the Import screen. On Linux, install `bubblewrap`. This contains a bad file. It does not prevent one, and a subverted reader could still return false results for that document, which stay unverified until you check them.
 
 ## API
 
@@ -199,7 +207,10 @@ Each document has three separate statuses:
 | `GET /api/import-batches/{id}/items` | Report lines. Filter with `category` or `identity`, page with `offset` and `limit`. |
 | `POST /api/import-batches/{id}/items/{item}/file` | Send one file as the raw body. Repeating it for a stored file changes nothing. |
 | `POST /api/import-batches/{id}/retry-reading` | Read failed files again. Add `?item=` for one. |
-| `POST /api/import-batches/{id}/hide` | Take a report off the screen. Its rows stay. |
+| `DELETE /api/import-batches/{id}` | Delete a report and its folder paths. Documents stay. |
+| `POST /api/auth/login` | Sign in. Open, with limited guesses. |
+| `POST /api/auth/logout`, `/logout-everywhere` | End this session, or every session. |
+| `GET /api/backups/archive-health` | What the last start recovered, set aside or could not find, and whether the reader is sandboxed. |
 | `GET /api/identity`, `PUT /api/identity` | Your details, used only to raise flags |
 | `GET /api/backups`, `POST /api/backups` | List backups, or start one |
 | `POST /api/backups/{name}/check` | Test-restore a backup into a temporary folder |
@@ -238,7 +249,9 @@ A Mac that goes to sleep freezes the browser along with everything else, which l
 
 **If a read fails,** the app tries again a few times, then shows what failed with a **Retry** button: no answer from the service, or an error from it. It never shows demo data or an empty archive in place of your records. If a refresh fails during use, your records stay on screen, marked as possibly out of date.
 
-**Known limits.** There is no login, so other programs and other user accounts running on this computer can reach the service while it runs (though other accounts cannot read the files on disk). That includes your identity details, and starting a backup. Files are not encrypted by the app or scanned for malware. A PDF is opened by your browser's own viewer, so it is only as safe as that viewer. The dev server is not a hardened production setup.
+**Signing in.** Every route needs a session except status and sign-in. The passphrase is set only from the command line, so nothing that reaches the service can claim your archive. A device stays signed in for 14 days at most, or until it goes 3 days unused. `npm run backend -- doctor` shows where your archive stands, and `sign-out-everywhere` ends every session.
+
+**Known limits.** Read [docs/threat-model.md](docs/threat-model.md), which separates websites, other devices, other accounts and a compromised host. The main one: **another program running under your own account can read everything directly**, and no login changes that. Run this under its own account on a dedicated machine. Identity details, the live archive and plain backups are not encrypted by this app, so keep disk encryption on. A PDF is opened by your browser's own viewer, so it is only as safe as that viewer. The dev server is not a hardened production setup.
 
 ## Demo mode
 
@@ -256,14 +269,17 @@ Use **Open demo archive** in the header, or go to `http://127.0.0.1:5180/?demo`.
 backend/
   this_is_you/
     config.py       Settings, and the refusal of unsafe ones
-    security.py     Loopback, host and cross-site checks; response headers
+    security.py     The session, loopback, host and cross-site checks on every request; response headers
+    auth.py         The passphrase, signed-in devices and limited guesses
+    reconcile.py    Squaring the originals folder with the database at start
     storage.py      The file store: streaming, hashing, validation
     documents.py    Recording uploads and reading documents back
     metadata.py     Running the reader, proposals and decisions
     observations.py Laboratory results: creating, correcting, approving
     imports.py      Batches of files and the report on them
     identity.py     Comparing printed patient details with yours, as a suggestion
-    backup.py       Writing, checking and restoring backups
+    backup.py       Writing, checking, restoring and pruning backups
+    backup_crypto.py  Encrypted backups
     lab_catalog.py  Known tests, unit spellings, safe conversions
     extraction/     worker.py: the limited process. rules.py and lab_rows.py: the text rules.
                     runner.py: starts it and checks its output. queue.py: one at a time.
@@ -272,6 +288,7 @@ backend/
     api/            HTTP routes
   tests/
 tools/          perf/: browser timings. readiness/: the whole workflow on a messy fictional folder.
+docs/threat-model.md  Who this defends against, how, and what it cannot stop
 docs/data-model.md  How future record types will attach to documents
 src/
   domain/       Types, date and number formatting, shared vocabulary. No React.

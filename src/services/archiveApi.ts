@@ -2,6 +2,7 @@
 import type {
   Archive,
   ArchiveDocument,
+  ArchiveHealth,
   BackupListing,
   IdentityDetails,
   ImportBatchSummary,
@@ -32,7 +33,7 @@ export class ArchiveRequestError extends Error {
 
 /** Why a read failed: the service could not be reached, or it answered with an error. An empty archive is neither. */
 export class ArchiveReadError extends Error {
-  constructor(readonly kind: 'unreachable' | 'error') {
+  constructor(readonly kind: 'unreachable' | 'error' | 'signed_out' | 'setup_required') {
     super(kind);
   }
 }
@@ -73,10 +74,12 @@ export interface DocumentsBackend {
   listBatches(): Promise<ImportBatchSummary[]>;
   listBatchItems(batchId: string, query: ReportQuery): Promise<{ items: ImportReportItem[]; total: number }>;
   retryReading(batchId: string, itemId?: number): Promise<unknown>;
-  hideBatch(batchId: string): Promise<unknown>;
+  removeBatch(batchId: string): Promise<unknown>;
   getIdentity(): Promise<IdentityDetails>;
   saveIdentity(details: Omit<IdentityDetails, 'configured'>): Promise<IdentityDetails>;
   listBackups(): Promise<BackupListing>;
+  getArchiveHealth(): Promise<ArchiveHealth>;
+  signOut(everywhere: boolean): Promise<unknown>;
   startBackup(): Promise<unknown>;
   checkBackup(name: string): Promise<unknown>;
 }

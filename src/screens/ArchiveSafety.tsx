@@ -116,6 +116,7 @@ export function IdentitySection() {
 }
 
 function backupStatus(b: BackupEntry) {
+  if (b.state === 'encrypted') return { text: 'Encrypted', color: C.green };
   if (b.state === 'incomplete') return { text: 'Did not finish, cannot be used', color: C.rust };
   if (b.state === 'damaged') return { text: 'Damaged, cannot be used', color: C.rust };
   if (!b.last_check) return { text: 'Not checked yet', color: C.amber };
@@ -143,8 +144,9 @@ export function BackupsSection() {
       </div>
       <p style={{ margin: '12px 0', fontSize: 13, lineHeight: 1.5, color: C.ink2, maxWidth: 820 }}>
         A backup holds the database, every original file, your decisions and correction history, and a manifest of
-        hashes. Each one is restored into a temporary folder and checked before it is reported as good. Backups are not
-        encrypted, so keep them somewhere private. They are on this drive until you copy them elsewhere.
+        hashes. Each one is restored into a temporary folder and checked before it is reported as good. Backups made
+        here are not encrypted, so keep them somewhere private.{' '}
+        {backups?.same_drive ? 'They are on the same drive as your archive, so losing that drive loses both. Copy them elsewhere, or set up another drive below.' : 'They are on a different drive from your archive.'}
       </p>
       {backups && <p style={{ margin: '0 0 8px', fontFamily: MONO, fontSize: 12, overflowWrap: 'anywhere', color: C.ink2 }}>{backups.location}</p>}
       {running && (
@@ -166,6 +168,7 @@ export function BackupsSection() {
           >
             <span style={{ flex: '1 1 300px', minWidth: 0 }}>
               <span style={{ display: 'block', fontFamily: MONO, fontSize: 12, overflowWrap: 'anywhere' }}>{b.name}</span>
+              {b.state === 'encrypted' && <span style={s.subBlock}>{fmtSize(b.bytes ?? 0)}</span>}
               {b.documents !== null && (
                 <span style={s.subBlock}>
                   {plural(b.documents, 'document')} · {fmtSize(b.bytes ?? 0)}
@@ -177,6 +180,8 @@ export function BackupsSection() {
               <button onClick={() => store.checkBackup(b.name)} disabled={!!running} style={s.link12}>
                 Test restore
               </button>
+            ) : b.state === 'encrypted' ? (
+              <span style={s.muted115}>Test it with the verify command below</span>
             ) : (
               <span style={s.muted115}>Cleared by the next backup</span>
             )}
@@ -187,7 +192,45 @@ export function BackupsSection() {
       <p style={{ fontFamily: MONO, fontSize: 11, color: C.ink3, margin: '8px 0 0' }}>
         To restore: stop the service, then npm run backend -- restore BACKUP --to FOLDER. A folder that holds files is
         replaced only after you type its name, and it is moved aside, not deleted.
+        <br />
+        For an encrypted copy on another drive: npm run backend -- backup --encrypt --to FOLDER, then verify BACKUP to test it.
       </p>
+    </section>
+  );
+}
+
+/** Signing out, and anything the archive found when it started that needs a person to look at it. */
+export function AccessSection() {
+  const store = useStore();
+  const health = store.state.archiveHealth;
+  const notes = [
+    health?.recovered ? `${plural(health.recovered, 'file')} left by an interrupted import came back as documents named Recovered file. Importing the same file again restores its name.` : null,
+    health?.set_aside ? `${plural(health.set_aside, 'file')} in the originals folder did not match their names and were moved to set-aside in the archive folder. Nothing was deleted.` : null,
+    health?.missing ? `${plural(health.missing, 'original')} recorded in the archive could not be found on disk. Restore from a backup if you need them.` : null,
+    health?.reader_isolation === 'basic' ? 'The PDF reader is running with limits only, without an operating-system sandbox. On Linux, install bubblewrap.' : null,
+  ].filter(Boolean);
+  return (
+    <section aria-label="Sign-in" style={{ marginTop: 40 }}>
+      <div style={head}>
+        <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 26, margin: 0 }}>Sign-in</h2>
+        <span style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px' }}>
+          <button onClick={() => store.signOut(false)} style={s.link13}>
+            Sign out
+          </button>
+          <button onClick={() => store.signOut(true)} style={s.link13}>
+            Sign out everywhere
+          </button>
+        </span>
+      </div>
+      <p style={{ margin: '12px 0', fontSize: 13, lineHeight: 1.5, color: C.ink2, maxWidth: 820 }}>
+        A device stays signed in for 14 days at most, or until it goes 3 days unused. Sign out everywhere after losing a
+        device. To change the passphrase, run npm run backend -- set-passphrase on the computer that holds the archive.
+      </p>
+      {notes.map((note) => (
+        <p key={note} role="status" style={{ margin: '0 0 8px', fontSize: 13, lineHeight: 1.5, color: C.rust, maxWidth: 820 }}>
+          {note}
+        </p>
+      ))}
     </section>
   );
 }

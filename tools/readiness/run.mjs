@@ -6,10 +6,12 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { addSession, login, PASSPHRASE, setPassphrase } from '../signin.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const { values: args } = parseArgs({ options: { scale: { type: 'string', default: '1' }, dist: { type: 'string', default: 'dist' }, keep: { type: 'boolean', default: false } } });
@@ -52,10 +54,13 @@ const crash = async () => {
   backend = null;
 };
 process.on('exit', () => backend?.kill('SIGKILL'));
+const cliWith = (input, ...command) => spawnSync(PY, ['-m', 'this_is_you', ...command], { cwd: REPO, env: serviceEnv(DATA, API), encoding: 'utf8', input });
 const cli = (...command) => spawnSync(PY, ['-m', 'this_is_you', ...command], { cwd: REPO, env: serviceEnv(DATA, API), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
-const api = async (url, port = API) => (await fetch(`http://127.0.0.1:${port}${url}`)).json();
-const post = (url, body) => fetch(`http://127.0.0.1:${API}${url}`, { method: 'POST', headers: HEADERS, body: body ? JSON.stringify(body) : undefined });
+const sessions = {};
+const signedIn = (port = API) => ({ Cookie: `tiy_session=${sessions[port]}` });
+const api = async (url, port = API) => (await fetch(`http://127.0.0.1:${port}${url}`, { headers: signedIn(port) })).json();
+const post = (url, body) => fetch(`http://127.0.0.1:${API}${url}`, { method: 'POST', headers: { ...HEADERS, ...signedIn() }, body: body ? JSON.stringify(body) : undefined });
 const sha = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
 
 const TYPES = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
@@ -87,10 +92,20 @@ const web = http.createServer((req, res) => {
   fs.createReadStream(file).pipe(res);
 }).listen(WEB, '127.0.0.1');
 
+// Fictional one-page PDFs that no earlier step has seen, so each counts as a new document.
+const MAKE_LATE = (n) => {
+  const file = path.join(root, `late-source-${n}.pdf`);
+  if (!fs.existsSync(file)) {
+    execFileSync(PY, ['-I', '-c', 'import sys;from pypdf import PdfWriter;w=PdfWriter();w.add_blank_page(612,792);w.add_metadata({"/Title":"Fictional late file "+sys.argv[2]});w.write(sys.argv[1])', file, String(n)]);
+  }
+  return file;
+};
 const external = [];
+const auditFree = (cookies) => !cookies.some((c) => c.name === 'tiy_session');
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
-async function open(hash = '#/import', width = 1440) {
+async function open(hash = '#/import', width = 1440, signed = true) {
   const context = await browser.newContext({ viewport: { width, height: 1000 } });
+  if (signed && sessions[API]) await addSession(context, sessions[API]);
   await context.route(/^https?:/, (route) => {
     const host = new URL(route.request().url()).hostname;
     if (host === '127.0.0.1') return route.continue();
@@ -137,9 +152,42 @@ try {
   const sourceBefore = hashTree(SOURCE);
   console.log(`${expected.total} files, ${expected.stored} distinct documents expected`, JSON.stringify(expected.counts));
 
-  section('An empty archive is not an error');
+  section('Nothing opens without signing in');
   await startService();
-  let { context, page } = await open('#/biomarkers');
+  let { context, page } = await open('#/overview', 1440, false);
+  await page.getByRole('heading', { name: 'Set a passphrase first' }).waitFor();
+  check('an archive with no passphrase stays closed and explains how to set one', (await page.locator('main').innerText()).includes('set-passphrase') && (await page.locator('input').count()) === 0);
+  check('a page cannot set a passphrase', (await fetch(`http://127.0.0.1:${API}/api/auth/passphrase`, { method: 'POST', headers: HEADERS, body: '{"passphrase":"fictional attacker passphrase"}' })).status === 401);
+  setPassphrase(PY, REPO, DATA);
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await page.getByRole('heading', { name: 'Sign in to your archive' }).waitFor();
+  check('the screen shows no records and no demo data', !FICTIONAL_DEMO.some((t) => page.url().includes(t)) && !/Overview|Biomarkers/.test(await page.locator('body').innerText()));
+  await page.getByLabel('Passphrase').fill('fictional wrong passphrase');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByText('That passphrase is not right.').waitFor();
+  check('a wrong passphrase is refused and says so', auditFree(await context.cookies()));
+  await page.getByLabel('Passphrase').fill(PASSPHRASE);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('heading', { name: /no records|yet/i }).or(page.getByRole('navigation')).first().waitFor();
+  const issued = (await context.cookies()).find((c) => c.name === 'tiy_session');
+  check('the right passphrase signs in with a private cookie', issued?.httpOnly && issued?.sameSite === 'Strict');
+  check('page code cannot read the session', !(await page.evaluate(() => document.cookie)).includes('tiy_session'));
+  await context.close();
+  sessions[API] = await login(API);
+  const raw = (extra = {}, url = '/api/documents', method = 'GET') => fetch(`http://127.0.0.1:${API}${url}`, { method, headers: extra });
+  for (const url of ['/api/documents', '/api/identity', '/api/backups', '/api/import-batches', '/api/observations', `/api/documents/${'0'.repeat(32)}/content`]) {
+    check(`no session, no answer: ${url.slice(0, 24)}`, (await raw({}, url)).status === 401);
+  }
+  check('a forged cookie is refused', (await raw({ Cookie: 'tiy_session=forged' })).status === 401);
+  check('a signed-in request from another origin is refused', (await raw({ ...signedIn(), Origin: 'https://evil.example' })).status === 403);
+  check('a signed-in request from a sibling site is refused', (await raw({ ...signedIn(), 'Sec-Fetch-Site': 'same-site' })).status === 403);
+  check('a signed-in change without the app header is refused', (await raw(signedIn(), '/api/backups', 'POST')).status === 403);
+  const doctor = cli('doctor');
+  check('the reader runs in an operating-system sandbox on this machine', doctor.stdout.includes('PDF reader: sandboxed'), doctor.stdout.split('\n').find((l) => l.startsWith('PDF')));
+  check('doctor reports the passphrase and the shared drive', doctor.stdout.includes('Passphrase: set') && doctor.stdout.includes('SAME DRIVE'));
+
+  section('An empty archive is not an error');
+  ({ context, page } = await open('#/biomarkers'));
   let text = await page.locator('body').innerText();
   check('an empty archive says so, with no error', !/not reachable|could not be read/i.test(text) && /no|yet/i.test(text));
   check('an empty archive shows no demo data', !FICTIONAL_DEMO.some((t) => text.includes(t)));
@@ -229,7 +277,7 @@ try {
   check('every row names a real file, and every file has a row', allRows.length === sourcePaths.size && allRows.every((r) => sourcePaths.has(r.path)));
   let bytesOk = 0;
   for (const row of allRows.filter((r) => r.state === 'stored')) {
-    const stored = Buffer.from(await (await fetch(`http://127.0.0.1:${API}/api/documents/${row.document_id}/content`)).arrayBuffer());
+    const stored = Buffer.from(await (await fetch(`http://127.0.0.1:${API}/api/documents/${row.document_id}/content`, { headers: signedIn() })).arrayBuffer());
     const disk = fs.readFileSync(path.join(SOURCE, row.path));
     if (stored.equals(disk)) bytesOk += 1;
   }
@@ -432,6 +480,9 @@ try {
   const live = { documents: await api('/api/documents'), identity: await api('/api/identity') };
   const second = spawn(PY, ['-m', 'this_is_you'], { cwd: REPO, env: serviceEnv(restored, API2), stdio: ['ignore', logFd, logFd] });
   await up(API2);
+  check('a restored archive stays closed until it has its own passphrase', (await (await fetch(`http://127.0.0.1:${API2}/api/status`)).json()).passphrase_set === false && (await fetch(`http://127.0.0.1:${API2}/api/documents`, { headers: signedIn() })).status === 401);
+  setPassphrase(PY, REPO, restored);
+  sessions[API2] = await login(API2);
   const copyDocs = await api('/api/documents', API2);
   const key = (d) => JSON.stringify([d.id, d.sha256, d.original_filename, d.metadata, d.extraction_status, d.verification_status]);
   const liveAtBackup = live.documents.documents.map(key).sort();
@@ -446,7 +497,7 @@ try {
   check('the import report came back', copyBatch.total === expected.total);
   let sameBytes = 0;
   for (const d of copyDocs.documents) {
-    const body = Buffer.from(await (await fetch(`http://127.0.0.1:${API2}/api/documents/${d.id}/content`)).arrayBuffer());
+    const body = Buffer.from(await (await fetch(`http://127.0.0.1:${API2}/api/documents/${d.id}/content`, { headers: signedIn(API2) })).arrayBuffer());
     if (sha(body) === d.sha256) sameBytes += 1;
   }
   check('every restored PDF has its original bytes', sameBytes === copyDocs.documents.length, `${sameBytes} of ${copyDocs.documents.length}`);
@@ -481,8 +532,102 @@ try {
   await context.close();
   ({ context, page } = await open('?demo#/import'));
   text = await page.locator('main').innerText();
-  check('the demo has no report, identity or backup section', !/Import report|Identity check|Back up now/.test(text));
+  check('the demo has no report, identity, backup or sign-in section', !/Import report|Identity check|Back up now|Sign out/.test(text));
   await context.close();
+  ({ context, page } = await open('?demo#/overview', 1440, false));
+  const apiCalls = [];
+  page.on('request', (r) => { if (new URL(r.url()).pathname.startsWith('/api/')) apiCalls.push(r.url()); });
+  await page.reload();
+  await page.waitForSelector('main');
+  check('the demo opens with no session and asks the service for nothing', apiCalls.length === 0 && (await page.locator('body').innerText()).includes('DEMONSTRATION'), apiCalls.slice(0, 2).join(', '));
+  await context.close();
+
+  section('Signed out in the middle of an import');
+  const lateFolder = path.join(root, 'Late Folder');
+  fs.mkdirSync(lateFolder);
+  for (let n = 0; n < 40; n++) fs.copyFileSync(MAKE_LATE(n), path.join(lateFolder, `late-${n}.pdf`));
+  const beforeLate = (await api('/api/documents')).documents.length;
+  ({ context, page } = await open('#/import'));
+  await page.getByRole('heading', { name: 'Import report' }).waitFor();
+  await chooseFolder(page, lateFolder);
+  await until('some of them to arrive', async () => (await api('/api/documents')).documents.length > beforeLate, 120000, 25);
+  check('ending every session from the command line works', cli('sign-out-everywhere').status === 0);
+  await page.getByRole('heading', { name: 'Sign in to your archive' }).waitFor();
+  check('the page stops showing records as soon as the session ends', !/Late Folder|Import report/.test(await page.locator('body').innerText()));
+  sessions[API] = await login(API);
+  await addSession(context, sessions[API]);
+  await page.getByLabel('Passphrase').fill(PASSPHRASE);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('heading', { name: 'Import report' }).waitFor();
+  const retryLate = page.getByRole('button', { name: 'Retry failures' });
+  await retryLate.waitFor();
+  await retryLate.click();
+  await until('the rest to arrive', async () => (await api('/api/import-batches')).batches.find((b) => b.label === 'Late Folder')?.counts.waiting === undefined && !(await api('/api/import-batches')).batches.find((b) => b.label === 'Late Folder')?.counts.failed, 120000);
+  sessions[API] = await login(API);
+  const afterLate = (await api('/api/documents')).documents.length;
+  check('every file arrived exactly once, with nothing lost to the sign-out', afterLate === beforeLate + 40, `${afterLate - beforeLate} added`);
+  await context.close();
+
+  section('Interrupted storage');
+  await crash();
+  const orphanBody = fs.readFileSync(MAKE_LATE(900));
+  const orphanSha = sha(orphanBody);
+  const orphanPath = path.join(DATA, 'originals', orphanSha.slice(0, 2), orphanSha.slice(2, 4), `${orphanSha}.pdf`);
+  fs.mkdirSync(path.dirname(orphanPath), { recursive: true });
+  fs.writeFileSync(orphanPath, orphanBody);
+  const damagedPath = path.join(DATA, 'originals', 'ab', 'cd', `abcd${'0'.repeat(60)}.pdf`);
+  fs.mkdirSync(path.dirname(damagedPath), { recursive: true });
+  fs.writeFileSync(damagedPath, 'fictional damaged file');
+  await startService();
+  const recovered = (await api('/api/documents')).documents.filter((d) => d.original_filename.startsWith('Recovered file '));
+  check('a stored file with no record comes back as a document', recovered.length === 1 && recovered[0].sha256 === orphanSha && recovered[0].verification_status === 'unverified');
+  check('a file that does not match its name is set aside, not deleted', !fs.existsSync(damagedPath) && fs.existsSync(path.join(DATA, 'set-aside', path.basename(damagedPath))));
+  check('the recovered bytes are exact', fs.readFileSync(orphanPath).equals(orphanBody));
+  ({ context, page } = await open('#/import'));
+  await page.getByText('left by an interrupted import').waitFor();
+  check('the browser says what was recovered and set aside', (await page.locator('section[aria-label="Sign-in"]').innerText()).includes('set-aside'));
+  await context.close();
+
+  section('Encrypted backups');
+  const drive = path.join(root, 'Fictional Drive');
+  fs.mkdirSync(drive);
+  const BACKUP_KEY = 'fictional backup passphrase';
+  const sealedRun = cliWith(`${BACKUP_KEY}\n`, 'backup', '--encrypt', '--to', drive);
+  check('an encrypted backup is written and tested', sealedRun.status === 0, sealedRun.stderr.trim().slice(0, 120));
+  const sealedName = fs.readdirSync(drive).find((n) => n.endsWith('.tiyb'));
+  const sealedPath = path.join(drive, sealedName);
+  check('the destination holds one file, with no plain copy beside it', fs.readdirSync(drive).length === 1);
+  const sealedBytes = fs.readFileSync(sealedPath);
+  check('nothing readable is in it', !['SQLite format', 'manifest.json', ...expected.forbidden_in_logs].some((w) => sealedBytes.includes(w)));
+  check('no plain copy stayed behind', !fs.existsSync(path.join(DATA, 'backup-staging')));
+  check('it passes verify with its passphrase', cliWith(`${BACKUP_KEY}\n`, 'verify', sealedPath).status === 0);
+  check('it fails verify with another passphrase', cliWith('fictional wrong passphrase\n', 'verify', sealedPath).status !== 0);
+  const flipped = Buffer.from(sealedBytes);
+  flipped[Math.floor(flipped.length / 2)] ^= 1;
+  const tampered = path.join(drive, sealedName.replace('.tiyb', '-1.tiyb'));
+  fs.writeFileSync(tampered, flipped);
+  const tamperedRestore = path.join(root, 'tampered');
+  check('a changed byte stops the restore and restores nothing', cliWith(`${BACKUP_KEY}\n`, 'restore', tampered, '--to', tamperedRestore).status !== 0 && !fs.existsSync(tamperedRestore) && !fs.readdirSync(root).some((n) => n.startsWith('.tampered')));
+  fs.rmSync(tampered);
+  fs.writeFileSync(tampered, sealedBytes.subarray(0, sealedBytes.length >> 1));
+  check('a cut-short file stops the restore', cliWith(`${BACKUP_KEY}\n`, 'restore', tampered, '--to', tamperedRestore).status !== 0 && !fs.existsSync(tamperedRestore));
+  fs.rmSync(tampered);
+  const sealedRestored = path.join(root, 'sealed-restored');
+  check('it restores into a new folder', cliWith(`${BACKUP_KEY}\n`, 'restore', sealedPath, '--to', sealedRestored).status === 0);
+  const restoredDb = execFileSync(PY, ['-I', '-c', 'import sqlite3,sys;c=sqlite3.connect(sys.argv[1]);print(c.execute("select count(*) from documents").fetchone()[0],c.execute("select count(*) from auth_credential").fetchone()[0],c.execute("select count(*) from auth_sessions").fetchone()[0],c.execute("pragma foreign_key_check").fetchone())', path.join(sealedRestored, 'archive.sqlite3')], { encoding: 'utf8' }).trim();
+  check('it holds every document and no sign-in details', restoredDb === `${(await api('/api/documents')).documents.length} 0 0 None`, restoredDb);
+  check('a backup to a drive that is not connected is refused', cli('backup', '--to', path.join(root, 'Missing Drive', 'Backups')).status !== 0 && !fs.existsSync(path.join(root, 'Missing Drive')));
+  const killMid = spawn(PY, ['-m', 'this_is_you', 'backup', '--encrypt', '--to', drive], { cwd: REPO, env: serviceEnv(DATA, API), stdio: ['pipe', 'ignore', 'ignore'] });
+  killMid.stdin.end(`${BACKUP_KEY}\n`);
+  await sleep(1200);
+  killMid.kill('SIGKILL');
+  await new Promise((r) => killMid.on('exit', r));
+  const leftBehind = fs.readdirSync(drive).filter((n) => n !== sealedName);
+  check('killing a sealed backup leaves nothing that can pass as finished', leftBehind.every((n) => n.endsWith('.incomplete')), leftBehind.join(', '));
+  await crash();
+  await startService();
+  check('plain copies from that crash are cleared on the next start', !fs.existsSync(path.join(DATA, 'backup-staging')));
+
   check('no request left this computer', external.length === 0, external.slice(0, 3).join(', '));
   const log = fs.readFileSync(LOG, 'utf8');
   const leaked = expected.forbidden_in_logs.filter((word) => log.includes(word));

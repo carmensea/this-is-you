@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from this_is_you import auth
 from this_is_you.config import Settings
 from this_is_you.main import create_app
 
@@ -33,7 +34,9 @@ def make_pdf(text: str = "Fictional test document") -> bytes:
 
 def client_for(data_dir: Path, **settings) -> TestClient:
     app = create_app(Settings(data_dir=data_dir, **settings))
-    return TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000), raise_server_exceptions=True)
+    client = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000), raise_server_exceptions=True)
+    client.cookies.set(auth.COOKIE, auth.create_session(app.state.sessions))  # Signed in, skipping the deliberately slow hash.
+    return client
 
 
 def upload(client: TestClient, body: bytes, name: str = "report.pdf", **overrides):

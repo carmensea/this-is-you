@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import type { IdentityCheck } from '../domain/types';
 import { ArchiveUnavailable } from '../screens/ArchiveUnavailable';
+import { SignIn } from '../screens/SignIn';
 import { ArchiveReadError, type DocumentsBackend } from '../services/archiveApi';
 import { droppedPath, walkEntry } from '../services/droppedFiles';
-import { connectLocalArchive, emptyPersonalArchive, READ_RETRY_DELAYS_MS, toArchiveDocument, withDocuments, type DocumentDto } from '../services/localArchiveApi';
+import { connectLocalArchive, emptyPersonalArchive, READ_RETRY_DELAYS_MS, toArchiveDocument, whenSignedOut, withDocuments, type DocumentDto } from '../services/localArchiveApi';
 import { UPLOAD_RETRY_DELAYS_MS } from '../state/batchImport';
 import { AppStore, type AppState } from '../state/store';
 import { StoreContext } from '../state/useStore';
@@ -145,6 +146,89 @@ describe('a refresh that fails during use', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
     await waitFor(() => expect(store.state.archiveStale).toBe(false));
     expect(container.textContent).not.toContain('may be out of date');
+  });
+});
+
+describe('signing in', () => {
+  const answer = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { 'x-content-type-options': 'nosniff' } });
+
+  it('asks for the passphrase and shows no records when the session has ended', async () => {
+    const { store, container } = mount(backendWith(), { view: 'documents' }, [dto()]);
+    expect(container.textContent).toContain('a.pdf');
+    act(() => store.setState({ signedOut: true }));
+    expect(container.textContent).toContain('Sign in to your archive');
+    expect(container.textContent).not.toContain('a.pdf');
+  });
+  it('comes back to the same screen with the records after signing in', async () => {
+    const { store, container } = mount(backendWith(), { view: 'documents' }, [dto()]);
+    act(() => store.setState({ signedOut: true }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
+    fireEvent.change(container.querySelector('input[type=password]')!, { target: { value: 'fictional passphrase' } });
+    await act(async () => { fireEvent.submit(container.querySelector('form')!); });
+    await waitFor(() => expect(store.state.signedOut).toBe(false));
+    expect(container.textContent).not.toContain('Sign in to your archive');
+  });
+  it('says why a sign-in was refused and stays on the form', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => answer(401, { code: 'wrong_passphrase', message: 'That passphrase is not right.' })));
+    const onSignedIn = vi.fn();
+    const { container } = render(<SignIn onSignedIn={onSignedIn} />);
+    fireEvent.change(container.querySelector('input[type=password]')!, { target: { value: 'fictional passphrase' } });
+    await act(async () => { fireEvent.submit(container.querySelector('form')!); });
+    expect((await screen.findByRole('alert')).textContent).toContain('That passphrase is not right.');
+    expect(onSignedIn).not.toHaveBeenCalled();
+  });
+  it('tells a signed-out read apart from an error and an outage', async () => {
+    const seen = vi.fn();
+    whenSignedOut(seen);
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/status' ? answer(200, { max_upload_bytes: 10, passphrase_set: true }) : answer(401, { code: 'signed_out' }))));
+    const { api } = await connectLocalArchive();
+    await expect(api.loadArchive()).rejects.toMatchObject({ kind: 'signed_out' });
+    expect(seen).toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(4); // Status and three reads: being signed out is not worth retrying.
+    whenSignedOut(() => {});
+  });
+  it('explains how to set a passphrase, and no page can set one', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => answer(200, { max_upload_bytes: 10, passphrase_set: false })));
+    await expect(connectLocalArchive()).rejects.toMatchObject({ kind: 'setup_required' });
+    const { container } = render(<ArchiveUnavailable kind="setup_required" onRetry={() => {}} />);
+    expect(container.textContent).toContain('npm run backend -- set-passphrase');
+    expect(container.querySelector('input')).toBeNull();
+  });
+  it('pauses an import when signed out and carries on afterwards, with nothing failed', async () => {
+    const server = backendWith();
+    const { store } = mount(server);
+    const real = server.uploadBatchItem;
+    server.uploadBatchItem = vi.fn(async () => {
+      store.setState({ signedOut: true });
+      return { kind: 'unreachable' as const };
+    });
+    await act(async () => { await store.imports.receive([file('Records/a.pdf'), file('Records/b.pdf'), file('Records/c.pdf')]); });
+    expect(server.uploadBatchItem).toHaveBeenCalledOnce(); // Nothing else is started, or retried, once signed out.
+    expect(store.state.report.problem).toContain('signed out');
+    server.uploadBatchItem = real;
+    store.setState({ signedOut: false });
+    await act(async () => { await store.imports.retryFailures(); });
+    expect(store.state.report.items.map((i) => i.state)).toEqual(['stored', 'stored', 'stored']);
+  });
+  it('removes a report only after asking, and says the documents stay', async () => {
+    const server = backendWith();
+    const { store, container } = mount(server);
+    await act(async () => { await store.imports.receive([file('Records/a.pdf')]); });
+    fireEvent.click(screen.getByText('Remove this report'));
+    expect(server.removeBatch).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Delete the report, keep the documents');
+    await act(async () => { fireEvent.click(screen.getByText('Delete the report, keep the documents')); });
+    expect(server.removeBatch).toHaveBeenCalledOnce();
+  });
+  it('shows what the archive found when it started, only when there is something to say', async () => {
+    const server = backendWith();
+    const { store, container } = mount(server);
+    await act(async () => { await store.loadArchiveSafety(); });
+    expect(container.textContent).not.toContain('set-aside');
+    server.getArchiveHealth = vi.fn(async () => ({ recovered: 2, set_aside: 1, missing: 3, reader_isolation: 'basic' as const }));
+    await act(async () => { await store.loadArchiveSafety(); });
+    for (const text of ['2 files left by an interrupted import', 'set-aside', '3 originals', 'bubblewrap']) expect(container.textContent).toContain(text);
   });
 });
 
@@ -328,7 +412,7 @@ describe('backups', () => {
   const entry = (over = {}) => ({ name: 'this-is-you-backup-20261102T100000Z', state: 'complete', created_at: 't', documents: 3, bytes: 2048, last_check: null, ...over });
   const withBackups = (backups: unknown[], extra = {}) => {
     const server = backendWith();
-    server.listBackups = vi.fn(async () => ({ location: '/private/backups', backups, running: null, last_result: null, ...extra })) as never;
+    server.listBackups = vi.fn(async () => ({ location: '/private/backups', same_drive: true, backups, running: null, last_result: null, ...extra })) as never;
     return server;
   };
   it('shows only what a check has shown about each backup', async () => {

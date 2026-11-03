@@ -26,6 +26,7 @@ def make_engine(database_path: Path) -> Engine:
         cursor.execute("PRAGMA journal_mode=WAL")
         # Survive power loss: a document reported as stored must still be there after a crash.
         cursor.execute("PRAGMA synchronous=FULL")
+        cursor.execute("PRAGMA secure_delete=ON")  # Removed rows are overwritten, not just unlinked.
         cursor.close()
 
     return engine

@@ -5,15 +5,18 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import sessionmaker
 
+from . import auth
+from .api.auth import router as auth_router
 from .api.backups import router as backups_router
 from .api.documents import router as documents_router
 from .api.imports import router as imports_router
 from .api.observations import router as observations_router
-from .backup import BackupJobs
+from .backup import BackupJobs, clear_leftovers
 from .config import Settings, load_settings, validate
 from .db import make_engine, migrate
 from .extraction.queue import ExtractionQueue
 from .metadata import documents_to_resume, process_document
+from .reconcile import reconcile
 from .schemas import Status
 from .security import LocalOnlyMiddleware
 from .storage import OriginalStore, UploadRejected
@@ -34,11 +37,15 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.store = store
     app.state.engine = engine
     app.state.sessions = sessionmaker(engine, expire_on_commit=False)
+    clear_leftovers(settings)
+    app.state.reconciled = reconcile(settings, app.state.sessions)  # Before reading resumes, so recovered files get read.
+    app.state.login_throttle = auth.LoginThrottle()
     app.state.extraction = ExtractionQueue(lambda document_id: process_document(app.state.sessions, store, settings.extraction_limits, document_id))
     for document_id in documents_to_resume(app.state.sessions):
         app.state.extraction.enqueue(document_id)
     app.state.backups = BackupJobs(settings)
-    app.add_middleware(LocalOnlyMiddleware)
+    app.add_middleware(LocalOnlyMiddleware, sessions=app.state.sessions)
+    app.include_router(auth_router)
     app.include_router(documents_router)
     app.include_router(observations_router)
     app.include_router(imports_router)
@@ -50,7 +57,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/api/status", response_model=Status)
     def status() -> Status:
-        return Status(status="ok", max_upload_bytes=settings.max_upload_bytes)
+        return Status(status="ok", max_upload_bytes=settings.max_upload_bytes, passphrase_set=auth.is_configured(app.state.sessions))
 
     return app
 

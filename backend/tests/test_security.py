@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from this_is_you import auth
 from this_is_you.config import Settings, UnsafeConfiguration, is_loopback_host, load_settings, validate
 from this_is_you.main import create_app
 
@@ -22,7 +23,9 @@ def test_refuses_connections_from_other_machines(data_dir, client_ip):
 @pytest.mark.parametrize("client_ip", ["127.0.0.1", "::1", "::ffff:127.0.0.1"])
 def test_accepts_loopback(data_dir, client_ip):
     app = create_app(Settings(data_dir=data_dir))
-    assert TestClient(app, base_url="http://localhost", client=(client_ip, 50000)).get("/api/documents").status_code == 200
+    signed_in = TestClient(app, base_url="http://localhost", client=(client_ip, 50000))
+    signed_in.cookies.set(auth.COOKIE, auth.create_session(app.state.sessions))
+    assert signed_in.get("/api/documents").status_code == 200
 
 
 @pytest.mark.parametrize("host", ["evil.example", "evil.example:8000", "192.168.1.20", "localhost.evil.example"])

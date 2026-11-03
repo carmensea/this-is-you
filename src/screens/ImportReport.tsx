@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { s } from '../components/styles';
 import { useStore } from '../state/useStore';
 import { C, MONO, SERIF } from '../theme';
@@ -9,6 +10,7 @@ const COLUMNS = 'minmax(0,1.3fr) 130px 86px minmax(0,1.7fr) 170px';
 export function ImportReport({ pickFolder }: { pickFolder: () => void }) {
   const store = useStore();
   const v = importReportVM(store);
+  const [confirming, setConfirming] = useState(false);
   if (!v.show) return null;
   return (
     <section aria-label="Import report" style={{ marginTop: 36 }}>
@@ -47,9 +49,20 @@ export function ImportReport({ pickFolder }: { pickFolder: () => void }) {
             </button>
           )}
           {v.hasBatch && (
-            <button onClick={v.onHide} style={s.link125}>
-              Hide this report
-            </button>
+            confirming ? (
+              <>
+                <button onClick={() => { setConfirming(false); void v.onRemove(); }} style={s.link125}>
+                  Delete the report, keep the documents
+                </button>
+                <button onClick={() => setConfirming(false)} style={s.link125}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setConfirming(true)} style={s.link125}>
+                Remove this report
+              </button>
+            )
           )}
         </span>
       </div>

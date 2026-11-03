@@ -12,9 +12,11 @@
 
 | `lab_observations` | One laboratory result: name, value, unit and range as printed, optional `test_code`, normalized value when safely convertible, flag, the dates `collected_on`, `reported_on`, `documented_on` and `imported_at`, source page, line and text, `origin`, `extraction_status` and `verification_status` |
 | `lab_observation_revisions` | Append-only history of a result. The first row is what was first read or entered. |
-| `import_batches` | One folder or set of files a person chose: `label`, `created_at`, `hidden` |
+| `import_batches` | One folder or set of files a person chose: `label`, `created_at`. `hidden` is no longer used: removing a report deletes its rows. |
 | `import_items` | One file of a batch, including refused ones: `path` (display text, never opened), `byte_size`, `state`, `message`, `document_id`, `attempts`. Changes in the same transaction as its document. |
 | `identity_profile` | One row at most: `full_name`, `date_of_birth`, `previous_names`. Only ever used to raise a flag. |
+| `auth_credential` | One row at most: the salted scrypt hash of the passphrase. Never in a backup. |
+| `auth_sessions` | Signed-in devices, as hashes of their tokens, with `created_at` and `last_seen_at`. Never in a backup. |
 
 A document's verified type, date, provider and title are read from `metadata_decisions`, and from nowhere else. Rereading a file adds a run and new proposals and leaves decisions alone. The full text of a document is not stored, only a hash of it and the short source lines behind each proposal.
 

@@ -138,10 +138,10 @@ export class BatchImporter {
     this.patch({ sending: { batchId, sent: 0, total: jobs.length } });
     void this.refresh();
     const worker = async () => {
-      for (let job = queue.shift(); job && unanswered < STOP_AFTER_UNANSWERED; job = queue.shift()) {
+      for (let job = queue.shift(); job && unanswered < STOP_AFTER_UNANSWERED && !this.store.state.signedOut; job = queue.shift()) {
         let result = await backend.uploadBatchItem(batchId, job.id, job.file);
         for (const delay of UPLOAD_RETRY_DELAYS_MS) {
-          if (result.kind === 'answered') break;
+          if (result.kind === 'answered' || this.store.state.signedOut) break;
           await wait(delay);
           result = await backend.uploadBatchItem(batchId, job.id, job.file);
         }
@@ -161,7 +161,9 @@ export class BatchImporter {
     this.patch({
       sending: null,
       problem:
-        unanswered >= STOP_AFTER_UNANSWERED || sent < jobs.length
+        this.store.state.signedOut
+          ? 'You were signed out, so this import paused. Everything already stored is safe. Choose Retry failures to carry on.'
+          : unanswered >= STOP_AFTER_UNANSWERED || sent < jobs.length
           ? 'The archive service stopped answering, so this import paused. Everything already stored is safe, and finished files will not be sent again.'
           : null,
     });
@@ -226,16 +228,16 @@ export class BatchImporter {
     void this.refresh();
   };
 
-  /** Takes it off this screen. The rows stay in the archive and in every backup. */
-  hide = async () => {
+  /** Deletes the report and the folder paths it holds, from the archive. Documents stay, and older backups still hold it. */
+  remove = async () => {
     const batchId = this.report.selected;
     if (!this.backend || !batchId) return;
     try {
-      await this.backend.hideBatch(batchId);
+      await this.backend.removeBatch(batchId);
       this.patch({ selected: null, category: null, identity: null, limit: PAGE_SIZE });
       await this.refresh();
     } catch {
-      this.patch({ problem: 'The archive service did not answer, so this report was not hidden.' });
+      this.patch({ problem: 'The archive service did not answer, so this report was not removed.' });
     }
   };
 }

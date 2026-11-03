@@ -2,9 +2,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { ArchiveUnavailable } from './screens/ArchiveUnavailable';
+import { SignIn } from './screens/SignIn';
 import { ArchiveReadError } from './services/archiveApi';
 import { isDemoMode, viewFromHash } from './services/archiveMode';
-import { connectLocalArchive } from './services/localArchiveApi';
+import { connectLocalArchive, whenSignedOut } from './services/localArchiveApi';
 import { AppStore } from './state/store';
 import { StoreContext } from './state/useStore';
 import './styles/fonts.css';
@@ -34,12 +35,14 @@ async function start() {
     const archive = await api.loadArchive();
     const store = // Start on the screen asked for. Passing through Documents would load a PDF nobody asked to see.
     new AppStore(archive, { view: viewFromHash() ?? 'documents', cur: archive.today }, backend);
+    whenSignedOut(() => store.setState({ signedOut: true }));
     show(store);
     store.watchReading();
   } catch (problem) {
     // Never fall back to the demo here: fictional records must not stand in for someone's own.
     const kind = problem instanceof ArchiveReadError ? problem.kind : 'error';
-    root.render(<ArchiveUnavailable kind={kind} onRetry={start} />);
+    if (kind === 'signed_out') root.render(<SignIn onSignedIn={start} />);
+    else root.render(<ArchiveUnavailable kind={kind} onRetry={start} />);
   }
 }
 

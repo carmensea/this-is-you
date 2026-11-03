@@ -198,6 +198,7 @@ class UploadResult(BaseModel):
 
 
 class Status(BaseModel):
+    passphrase_set: bool
     status: str
     max_upload_bytes: int
 

@@ -1,16 +1,35 @@
-"""Start the service: python -m this_is_you. Or back up, check and restore: see --help."""
+"""Start the service: python -m this_is_you. Or set a passphrase, back up, check, restore and tidy: see --help."""
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 import os
 import sys
 from pathlib import Path
 
 import uvicorn
+from sqlalchemy.orm import sessionmaker
 
-from .backup import BackupProblem, create_backup, hold_service_lock, restore_backup, verify_backup
-from .config import UnsafeConfiguration, load_settings
+from . import auth
+from .backup import (
+    BackupProblem,
+    apply_prune,
+    create_backup,
+    create_encrypted_backup,
+    hold_service_lock,
+    on_same_drive,
+    plan_prune,
+    require_destination,
+    restore_backup,
+    restore_sealed,
+    verify_backup,
+    verify_sealed,
+)
+from .backup_crypto import EXTENSION, MIN_PASSPHRASE
+from .config import UnsafeConfiguration, is_loopback_host, load_settings
+from .db import make_engine, migrate
+from .extraction.sandbox import BASIC, isolation
 
 
 def serve(settings) -> None:
@@ -23,21 +42,135 @@ def serve(settings) -> None:
         sys.exit(str(problem))
     print(f"This Is You archive service on http://{settings.host}:{settings.port}\nDocuments are stored in {settings.data_dir}", flush=True)
     # Access logs stay off: request details about health records have no business in a log.
-    uvicorn.run("this_is_you.main:app_factory", factory=True, host=settings.host, port=settings.port, access_log=False, server_header=False, log_level="warning")
+    # Forwarded headers are ignored, so nothing a client sends can change who it appears to be.
+    # A client that stops reading cannot hold the service open once it is told to stop. Crashes are already safe.
+    uvicorn.run("this_is_you.main:app_factory", factory=True, host=settings.host, port=settings.port, access_log=False, server_header=False, log_level="warning", proxy_headers=False, timeout_graceful_shutdown=10)
+
+
+def _ask_secret(prompt: str, confirm: bool = False) -> str:
+    """Typed with no echo. A script can pipe it in, so it never has to appear in a command line or the environment."""
+    try:
+        if not sys.stdin.isatty():
+            return sys.stdin.readline().rstrip("\r\n")
+        secret = getpass.getpass(prompt)
+        if confirm and getpass.getpass("Type it again: ") != secret:
+            sys.exit("Those did not match. Nothing was changed.")
+        return secret
+    except (EOFError, KeyboardInterrupt):
+        sys.exit("Nothing was changed.")
+
+
+def _sessions(settings) -> sessionmaker:
+    settings.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    engine = make_engine(settings.database_path)
+    migrate(engine)
+    return sessionmaker(engine, expire_on_commit=False)
+
+
+def _print_check(check) -> None:
+    print("Check passed." if check.ok else "Check failed: " + " ".join(check.problems))
+    sys.exit(0 if check.ok else 1)
+
+
+def _backup(settings, args) -> None:
+    destination = (args.to.expanduser() if args.to else settings.backups_dir).absolute()
+    require_destination(destination)
+    settings.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if on_same_drive(destination, settings.data_dir):
+        print("Note: this is the same drive as the archive, so losing the drive loses both. Copy it elsewhere or use --to.")
+    if args.encrypt:
+        print("Keep this passphrase somewhere safe. Without it the backup cannot be opened, by anyone.")
+        passphrase = _ask_secret("Passphrase for this backup: ", confirm=True)
+        if len(passphrase) < MIN_PASSPHRASE:
+            sys.exit(f"Use at least {MIN_PASSPHRASE} characters. Nothing was written.")
+        result = create_encrypted_backup(settings, destination, passphrase)
+        print(f"Encrypted backup written and opened again to test it: {result.path}\n{result.documents} documents, {result.bytes} bytes.")
+        for problem in result.problems:
+            print(f"Problem: {problem}")
+        return
+    result = create_backup(settings.database_path, settings.originals_dir, destination)
+    print(f"Backup written: {result.path}\n{result.documents} documents, {result.bytes} bytes.")
+    if destination.stat().st_mode & 0o077:
+        print("Warning: this drive does not keep files private to you, and this backup is not encrypted. Use --encrypt.")
+    for problem in result.problems:
+        print(f"Problem: {problem}")
+    _print_check(verify_backup(result.path))
+
+
+def _restore(args) -> None:
+    target = args.to.expanduser().resolve()
+    confirmation = None
+    if target.exists() and any(target.iterdir()):
+        print(f'"{target}" already holds files. It will be moved aside, not deleted.')
+        try:
+            confirmation = input(f'Type "{target.name}" to replace it: ').strip() if sys.stdin.isatty() else None
+        except (EOFError, KeyboardInterrupt):
+            confirmation = None
+    if args.backup.name.endswith(EXTENSION):
+        moved = restore_sealed(args.backup, target, _ask_secret("Passphrase for this backup: "), confirmation, args.accept_recorded_problems)
+    else:
+        moved = restore_backup(args.backup, target, confirmation, args.accept_recorded_problems)
+    print(f"Restored to {target}.")
+    print("Set a passphrase for it before signing in: sign-in details are never in a backup.")
+    if moved:
+        print(f"The previous archive was kept at {moved}.")
+
+
+def _prune(settings, args) -> None:
+    plan = plan_prune(settings, args.keep, args.include_replaced)
+    if not plan:
+        print("Nothing to remove.")
+        return
+    for item in plan:
+        print(f"{item.why}: {item.path}")
+    if not args.yes:
+        print("Nothing was removed. Add --yes to remove these.")
+        return
+    apply_prune(plan)
+    print(f"Removed {len(plan)}. Copies on other drives are not affected, and files already deleted may remain recoverable from the disk.")
+
+
+def _doctor(settings) -> None:
+    """Where this archive stands on the things a person can act on. Changes nothing."""
+    data = settings.data_dir
+    if not data.is_dir():
+        print("No archive here yet.")
+        return
+    sessions = _sessions(settings)
+    lines = [
+        ("Passphrase", "set" if auth.is_configured(sessions) else "NOT SET: run set-passphrase, nothing can be read until then"),
+        ("Signed-in devices", str(auth.count_sessions(sessions))),
+        ("Listening on", f"{settings.host}:{settings.port}" + ("" if is_loopback_host(settings.host) else " NOT PRIVATE")),
+        ("Archive folder", "private to you" if not data.stat().st_mode & 0o077 else "OPEN TO OTHER ACCOUNTS: run chmod 700 on it"),
+        ("PDF reader", "sandboxed" if isolation() != BASIC else "limits only: install bubblewrap (bwrap) on Linux"),
+        ("Backups", "ON THE SAME DRIVE as the archive" if on_same_drive(settings.backups_dir, data) else "on another drive"),
+        ("Set aside", f"{sum(1 for _ in settings.quarantine_dir.iterdir()) if settings.quarantine_dir.is_dir() else 0} files to look at in {settings.quarantine_dir}"),
+        ("Old full copies", f"{len(list(data.glob('*.before-upgrade-*')))} pre-upgrade databases, {len(list(data.parent.glob(data.name + '.replaced-*')))} replaced archives"),
+    ]
+    for name, value in lines:
+        print(f"{name}: {value}")
 
 
 def main() -> None:
     os.umask(0o077)  # Everything this process creates is private to this user.
     parser = argparse.ArgumentParser(prog="this_is_you")
     commands = parser.add_subparsers(dest="command")
+    commands.add_parser("set-passphrase", help="Set or replace the sign-in passphrase. Signs out every device.")
+    commands.add_parser("sign-out-everywhere", help="End every signed-in session, as after losing a device.")
+    commands.add_parser("doctor", help="Show where this archive stands on security and backups. Changes nothing.")
     backup = commands.add_parser("backup", help="Write a backup. Safe while the service runs.")
-    backup.add_argument("--to", type=Path, help="Folder to write into. Defaults to the backups folder.")
+    backup.add_argument("--to", type=Path, help="Folder to write into. Defaults to the backups folder. Its parent has to exist already.")
+    backup.add_argument("--encrypt", action="store_true", help="Seal it into one encrypted file. Asks for a passphrase of its own.")
     verify = commands.add_parser("verify", help="Check a backup against its manifest. Changes nothing.")
     verify.add_argument("backup", type=Path)
     restore = commands.add_parser("restore", help="Restore a backup into a folder.")
     restore.add_argument("backup", type=Path)
     restore.add_argument("--to", type=Path, required=True, help="Folder to restore into. A new folder is the safe choice.")
     restore.add_argument("--accept-recorded-problems", action="store_true", help="Restore a backup that recorded missing or changed originals when it was made.")
+    prune = commands.add_parser("prune", help="List old backups and leftovers. Removes them only with --yes.")
+    prune.add_argument("--keep", type=int, default=3, help="Newest backups to keep. The newest that passed a check is always kept.")
+    prune.add_argument("--include-replaced", action="store_true", help="Also list archives moved aside by a restore.")
+    prune.add_argument("--yes", action="store_true", help="Remove what is listed.")
     args = parser.parse_args()
     try:
         settings = load_settings()
@@ -46,31 +179,27 @@ def main() -> None:
     try:
         if args.command is None:
             serve(settings)
+        elif args.command == "set-passphrase":
+            try:
+                auth.set_passphrase(_sessions(settings), _ask_secret("New passphrase: ", confirm=True))
+            except auth.WeakPassphrase as problem:
+                sys.exit(f"{problem} Nothing was changed.")
+            print("Passphrase set. Every device was signed out.")
+        elif args.command == "sign-out-everywhere":
+            auth.end_all_sessions(_sessions(settings))
+            print("Every device was signed out.")
+        elif args.command == "doctor":
+            _doctor(settings)
         elif args.command == "backup":
-            result = create_backup(settings.database_path, settings.originals_dir, args.to or settings.backups_dir)
-            print(f"Backup written: {result.path}\n{result.documents} documents, {result.bytes} bytes.")
-            for problem in result.problems:
-                print(f"Problem: {problem}")
-            check = verify_backup(result.path)
-            print("Check passed." if check.ok else "Check failed: " + " ".join(check.problems))
-            sys.exit(0 if check.ok else 1)
+            _backup(settings, args)
         elif args.command == "verify":
-            check = verify_backup(args.backup)
-            print("Check passed." if check.ok else "Check failed: " + " ".join(check.problems))
-            sys.exit(0 if check.ok else 1)
+            if args.backup.name.endswith(EXTENSION):
+                _print_check(verify_sealed(args.backup, settings.staging_dir, _ask_secret("Passphrase for this backup: ")))
+            _print_check(verify_backup(args.backup))
         elif args.command == "restore":
-            target = args.to.expanduser().resolve()
-            confirmation = None
-            if target.exists() and any(target.iterdir()):
-                print(f'"{target}" already holds files. It will be moved aside, not deleted.')
-                try:
-                    confirmation = input(f'Type "{target.name}" to replace it: ').strip() if sys.stdin.isatty() else None
-                except (EOFError, KeyboardInterrupt):
-                    confirmation = None
-            moved = restore_backup(args.backup, target, confirmation, args.accept_recorded_problems)
-            print(f"Restored to {target}.")
-            if moved:
-                print(f"The previous archive was kept at {moved}.")
+            _restore(args)
+        elif args.command == "prune":
+            _prune(settings, args)
     except BackupProblem as problem:
         sys.exit(str(problem))
     except OSError:

@@ -5,7 +5,7 @@ import logging
 import unicodedata
 from dataclasses import dataclass
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from .documents import utc_now
@@ -177,12 +177,14 @@ def documents_to_reread(sessions: sessionmaker[Session], batch_id: str, item_id:
         return [d.id for d in documents]
 
 
-def hide_batch(sessions: sessionmaker[Session], batch_id: str) -> None:
+def remove_batch(sessions: sessionmaker[Session], batch_id: str) -> None:
+    """Deletes the report and the folder paths it holds. Documents are not touched."""
     with sessions() as session:
         batch = session.get(ImportBatch, batch_id)
         if batch is None:
             raise _missing()
-        batch.hidden = True
+        session.execute(delete(ImportItem).where(ImportItem.batch_id == batch_id))
+        session.delete(batch)
         session.commit()
 
 

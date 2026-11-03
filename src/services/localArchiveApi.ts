@@ -208,6 +208,12 @@ export function emptyPersonalArchive(today: string): Archive {
 export const READ_RETRY_DELAYS_MS = [250, 750, 1500];
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// A session can end at any moment: it timed out, or was ended from elsewhere. The app decides what to show.
+let onSignedOut = () => {};
+export const whenSignedOut = (handler: () => void) => {
+  onSignedOut = handler;
+};
+
 async function getJson<T>(url: string, delays = READ_RETRY_DELAYS_MS): Promise<T> {
   let failure = new ArchiveReadError('unreachable');
   for (let attempt = 0; ; attempt++) {
@@ -216,7 +222,8 @@ async function getJson<T>(url: string, delays = READ_RETRY_DELAYS_MS): Promise<T
       // Only this service sends this header, so a proxy's error page is not mistaken for its answer.
       const fromService = response.headers.get('x-content-type-options') === 'nosniff';
       if (response.ok && fromService) return (await response.json()) as T;
-      failure = new ArchiveReadError(fromService ? 'error' : 'unreachable');
+      if (fromService && response.status === 401) onSignedOut();
+      failure = new ArchiveReadError(!fromService ? 'unreachable' : response.status === 401 ? 'signed_out' : 'error');
       if (fromService && response.status < 500) throw failure;
     } catch (problem) {
       if (problem === failure) throw problem;
@@ -245,6 +252,7 @@ async function post<T>(url: string, body?: unknown, method = 'POST'): Promise<T>
     throw new ArchiveRequestError('The archive service could not be reached. Nothing was saved.', 'unreachable');
   }
   const data = await response.json().catch(() => null);
+  if (response.status === 401 && data?.code === 'signed_out') onSignedOut();
   if (!response.ok) throw new ArchiveRequestError(data?.message ?? 'This could not be saved.', data?.code ?? 'error');
   return data as T;
 }
@@ -259,6 +267,7 @@ async function uploadBatchItem(batchId: string, itemId: number, file: File): Pro
       headers: { [CLIENT_HEADER]: '1', 'Content-Type': 'application/pdf' },
       body: file,
     });
+    if (response.status === 401) onSignedOut();
     if (!response.ok) return { kind: 'unreachable' };
     return { kind: 'answered', item: (await response.json()) as ImportReportItem };
   } catch {
@@ -273,8 +282,19 @@ const reportUrl = (batchId: string, { category, identity, limit }: ReportQuery) 
   return `/api/import-batches/${batchId}/items?${query}`;
 };
 
+/** Resolves to why it was refused, or null once signed in. */
+export async function signIn(passphrase: string): Promise<string | null> {
+  try {
+    await post('/api/auth/login', { passphrase });
+    return null;
+  } catch (problem) {
+    return problem instanceof ArchiveRequestError && problem.code !== 'unreachable' ? problem.message : 'The archive service did not answer. Check that it is running.';
+  }
+}
+
 export async function connectLocalArchive(): Promise<{ api: ArchiveApi; backend: DocumentsBackend }> {
-  const status = await getJson<{ max_upload_bytes: number }>('/api/status');
+  const status = await getJson<{ max_upload_bytes: number; passphrase_set?: boolean }>('/api/status');
+  if (status.passphrase_set === false) throw new ArchiveReadError('setup_required');
   const backend: DocumentsBackend = {
     maxUploadBytes: status.max_upload_bytes,
     listDocuments,
@@ -295,7 +315,9 @@ export async function connectLocalArchive(): Promise<{ api: ArchiveApi; backend:
     listBatchItems: (batchId, query) => getJson(reportUrl(batchId, query), []),
     retryReading: (batchId, itemId) =>
       post(`/api/import-batches/${batchId}/retry-reading${itemId === undefined ? '' : `?item=${itemId}`}`),
-    hideBatch: (batchId) => post(`/api/import-batches/${batchId}/hide`),
+    removeBatch: (batchId) => post(`/api/import-batches/${batchId}`, undefined, 'DELETE'),
+    getArchiveHealth: () => getJson('/api/backups/archive-health'),
+    signOut: (everywhere) => post(everywhere ? '/api/auth/logout-everywhere' : '/api/auth/logout'),
     getIdentity: () => getJson('/api/identity'),
     saveIdentity: (details) => post('/api/identity', details, 'PUT'),
     listBackups: () => getJson('/api/backups', []),

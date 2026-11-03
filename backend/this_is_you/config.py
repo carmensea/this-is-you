@@ -39,6 +39,14 @@ class Settings:
         return self.data_dir / "incoming"
 
     @property
+    def quarantine_dir(self) -> Path:
+        return self.data_dir / "set-aside"
+
+    @property
+    def staging_dir(self) -> Path:
+        return self.data_dir / "backup-staging"
+
+    @property
     def backups_dir(self) -> Path:
         # Beside the archive, not in it. Point this at another drive to survive losing this one.
         return self.backups_dir_override or self.data_dir.with_name(self.data_dir.name + " Backups")
@@ -73,8 +81,8 @@ def enclosing_git_repository(path: Path) -> Path | None:
 def validate(settings: Settings) -> Settings:
     if not is_loopback_host(settings.host):
         raise UnsafeConfiguration(
-            f"Refusing to bind to {settings.host}. This service has no authentication, "
-            "so it only listens on this computer (127.0.0.1)."
+            f"Refusing to bind to {settings.host}. This service only listens on this computer (127.0.0.1). "
+            "Reach it from elsewhere through a private proxy, never by opening it to a network."
         )
     repository = enclosing_git_repository(settings.data_dir)
     if repository is not None:

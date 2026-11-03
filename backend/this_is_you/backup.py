@@ -23,6 +23,7 @@ from pathlib import Path
 
 from alembic.script import ScriptDirectory
 
+from .backup_crypto import EXTENSION, CannotOpen, open_into, seal_folder
 from .config import Settings, enclosing_git_repository
 from .db import _config
 
@@ -36,6 +37,10 @@ INCOMPLETE_SUFFIX = ".incomplete"
 LOCK_FILE = "service.lock"
 _NAME = re.compile(r"this-is-you-backup-\d{8}T\d{6}Z(-\d+)?")
 _ORIGINAL = re.compile(r"originals/([0-9a-f]{2})/([0-9a-f]{2})/\1\2[0-9a-f]{60}\.pdf")
+# Sign-in details stay out of every backup. Reused passphrases should not be crackable from a lost drive,
+# and a restored archive is signed in to again with a passphrase set on that machine.
+_NOT_BACKED_UP = ("auth_credential", "auth_sessions")
+KEEP_BEFORE_UPGRADE = 2
 _COUNTED = ("documents", "import_events", "extraction_runs", "metadata_proposals", "metadata_decisions", "lab_observations", "lab_observation_revisions", "import_batches", "import_items", "identity_profile")
 _CHUNK = 1024 * 1024
 
@@ -110,6 +115,11 @@ def _snapshot_database(source: Path, target: Path) -> None:
     try:
         src.backup(dst)  # The online backup API includes everything committed to the WAL.
         dst.execute("PRAGMA journal_mode=DELETE")  # One self-contained file, with no -wal to lose.
+        dst.execute("PRAGMA secure_delete=ON")
+        present = {r[0] for r in dst.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table in _NOT_BACKED_UP:
+            if table in present:
+                dst.execute(f'DELETE FROM "{table}"')
         dst.commit()
     finally:
         dst.close()
@@ -126,11 +136,25 @@ class BackupResult:
     problems: list[str]
 
 
-def create_backup(database: Path, originals: Path, destination: Path, on_progress=lambda done, total: None) -> BackupResult:
+def require_destination(destination: Path) -> None:
+    """A drive that is not connected must not turn into a new folder on this one, holding a backup nobody expects there."""
+    if not destination.expanduser().parent.is_dir():
+        raise BackupProblem(f"{destination.parent} does not exist. If it is on another drive, check that the drive is connected.")
+
+
+def on_same_drive(destination: Path, data_dir: Path) -> bool:
+    """Whether losing this drive would lose both. A folder not created yet counts as where it would be created."""
+    path = destination.expanduser().resolve()
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    return path.stat().st_dev == data_dir.stat().st_dev
+
+
+def create_backup(database: Path, originals: Path, destination: Path, on_progress=lambda done, total: None, staging: bool = False) -> BackupResult:
     """Builds a complete backup folder inside `destination`. Originals are chosen from the snapshot, so they always match it."""
     if enclosing_git_repository(destination) is not None:
         raise BackupProblem("Backups cannot be kept inside a Git repository. Choose a folder outside it.")
-    if destination.resolve().is_relative_to(originals.parent.resolve()):
+    if not staging and destination.resolve().is_relative_to(originals.parent.resolve()):
         raise BackupProblem("Backups cannot be kept inside the archive folder. Choose a folder outside it.")
     if not database.is_file():
         raise BackupProblem("There is no archive here to back up.")
@@ -237,6 +261,80 @@ def _check_database(path: Path, expected_counts: dict | None) -> tuple[list[str]
     finally:
         connection.close()
     return problems, documents
+
+
+def create_encrypted_backup(settings: Settings, destination: Path, passphrase: str) -> BackupResult:
+    """Seals a checked backup into one file on `destination`, which never sees a plain copy, even after a crash.
+
+    shortcut: the plain copy is built in the archive's own folder first, so a backup needs room for the archive again there. Stream the originals straight into the seal if that ever matters.
+    """
+    if enclosing_git_repository(destination) is not None:
+        raise BackupProblem("Backups cannot be kept inside a Git repository. Choose a folder outside it.")
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    staging = settings.staging_dir
+    _remove_tree(staging)
+    staging.mkdir(mode=0o700)
+    work: Path | None = None
+    try:
+        result = create_backup(settings.database_path, settings.originals_dir, staging, staging=True)
+        check = verify_backup(result.path)
+        if not check.ok:
+            raise BackupProblem("This backup failed its check, so it was not sealed. " + " ".join(check.problems))
+        final = destination / (result.path.name + EXTENSION)
+        work = final.with_name(final.name + INCOMPLETE_SUFFIX)
+        seal_folder(result.path, work, passphrase)
+        trial = staging / "trial"
+        try:
+            open_into(work, trial, passphrase)
+        except CannotOpen:
+            raise BackupProblem("The sealed copy could not be opened again, so it was not kept.") from None
+        if not (check := verify_backup(trial)).ok:
+            raise BackupProblem("The sealed copy did not pass its check, so it was not kept. " + " ".join(check.problems))
+        os.rename(work, final)
+        work = None
+        _sync_dir(destination)
+    finally:
+        if work is not None:
+            work.unlink(missing_ok=True)
+        _remove_tree(staging)
+    return BackupResult(final, result.documents, final.stat().st_size, result.problems)
+
+
+def _open_sealed(sealed: Path, work: Path, passphrase: str) -> None:
+    try:
+        open_into(sealed, work, passphrase)
+    except CannotOpen:
+        _remove_tree(work)
+        raise BackupProblem("This backup could not be opened. The passphrase is wrong, or the file was damaged or changed. Nothing was restored.") from None
+    except BaseException:
+        _remove_tree(work)
+        raise
+
+
+def verify_sealed(sealed: Path, staging: Path, passphrase: str) -> Check:
+    """Opens it in the archive's private folder, which is never the backup drive, and checks everything. Keeps nothing."""
+    _remove_tree(staging)
+    staging.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    staging.mkdir(mode=0o700)
+    try:
+        _open_sealed(sealed, staging / "opened", passphrase)
+        return verify_backup(staging / "opened")
+    except BackupProblem as problem:
+        return Check(False, [str(problem)])
+    finally:
+        _remove_tree(staging)
+
+
+def restore_sealed(sealed: Path, target: Path, passphrase: str, replace_confirmation: str | None = None, accept_problems: bool = False) -> Path | None:
+    target = target.expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Beside the target, which is about to hold the same plain files anyway. Cleared on the next restore there.
+    opened = target.with_name(f".{target.name}.restoring-opened-{os.getpid()}")
+    _open_sealed(sealed, opened, passphrase)
+    try:
+        return restore_backup(opened, target, replace_confirmation, accept_problems)
+    finally:
+        _remove_tree(opened)
 
 
 def verify_backup(folder: Path) -> Check:
@@ -368,6 +466,10 @@ def restore_backup(folder: Path, target: Path, replace_confirmation: str | None 
         if _service_running(target):
             raise BackupProblem("The service is using this archive. Stop it, then restore.")
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Plain copies left by a crash in an earlier restore here. The one this call may be reading from is kept.
+    for leftover in target.parent.glob(f".{target.name}.restoring-*"):
+        if leftover.resolve() != folder.resolve():
+            _remove_tree(leftover)
     work = Path(tempfile.mkdtemp(dir=target.parent, prefix=f".{target.name}.restoring-"))
     work.rmdir()
     try:
@@ -418,6 +520,8 @@ def describe(folder: Path) -> dict:
     """A quick look for the list. It reads the manifest and last check, and proves nothing by itself."""
     if folder.name.endswith(INCOMPLETE_SUFFIX):
         return {"name": folder.name, "state": "incomplete", "created_at": None, "documents": None, "bytes": None, "last_check": None}
+    if folder.is_file():
+        return {"name": folder.name, "state": "encrypted", "created_at": None, "documents": None, "bytes": folder.stat().st_size, "last_check": None}
     try:
         manifest = json.loads((folder / MANIFEST).read_text())
         files, counts = manifest["files"], manifest["counts"]
@@ -429,6 +533,59 @@ def describe(folder: Path) -> dict:
     except (OSError, ValueError):
         last_check = None
     return {"name": folder.name, **info, "last_check": last_check}
+
+
+def _is_backup(path: Path) -> bool:
+    name = path.name.removesuffix(INCOMPLETE_SUFFIX)
+    if name.endswith(EXTENSION):
+        return path.is_file() and not path.is_symlink() and _NAME.fullmatch(name.removesuffix(EXTENSION)) is not None
+    return path.is_dir() and not path.is_symlink() and _NAME.fullmatch(name) is not None
+
+
+def clear_leftovers(settings: Settings) -> None:
+    """At start, when nothing can be using them: plain copies a crash left behind, and old pre-upgrade databases."""
+    _remove_tree(settings.staging_dir)
+    if settings.backups_dir.is_dir():
+        for leftover in settings.backups_dir.glob(".restore-test-*"):
+            _remove_tree(leftover)
+    # The newest are kept for going back. Older ones are only more copies of old records.
+    copies = sorted(settings.data_dir.glob(f"{DATABASE}.before-upgrade-*"), reverse=True)
+    for stale in copies[KEEP_BEFORE_UPGRADE:]:
+        stale.unlink(missing_ok=True)
+
+
+@dataclass(frozen=True)
+class PruneItem:
+    path: Path
+    why: str
+
+
+def plan_prune(settings: Settings, keep: int, include_replaced: bool) -> list[PruneItem]:
+    """What `prune` would remove. Unfinished work, backups past the newest `keep`, and replaced archives if asked.
+
+    The newest backup whose last check passed always stays. Encrypted ones cannot be checked without the passphrase,
+    so they count only by age.
+    """
+    root = settings.backups_dir
+    plan: list[PruneItem] = []
+    if root.is_dir():
+        backups = sorted((p for p in root.iterdir() if _is_backup(p)), key=lambda p: p.name, reverse=True)
+        finished = [p for p in backups if not p.name.endswith(INCOMPLETE_SUFFIX)]
+        plan += [PruneItem(p, "did not finish") for p in backups if p.name.endswith(INCOMPLETE_SUFFIX)]
+        plan += [PruneItem(p, "failed test restore") for p in root.glob(".restore-test-*")]
+        good = next((p for p in finished if (describe(p).get("last_check") or {}).get("ok")), None)
+        plan += [PruneItem(p, "older backup") for p in finished[keep:] if p != good]
+    if include_replaced:
+        plan += [PruneItem(p, "replaced archive") for p in sorted(settings.data_dir.parent.glob(f"{settings.data_dir.name}.replaced-*"))]
+    return plan
+
+
+def apply_prune(plan: list[PruneItem]) -> None:
+    for item in plan:
+        if item.path.is_dir():
+            _remove_tree(item.path)
+        else:
+            item.path.unlink(missing_ok=True)
 
 
 class BackupJobs:
@@ -444,7 +601,7 @@ class BackupJobs:
             return []
         # While a backup runs, its own unfinished folder is not a leftover.
         writing = self.current is not None and self.current["kind"] == "backup"
-        found = [p for p in root.iterdir() if p.is_dir() and _NAME.fullmatch(p.name.removesuffix(INCOMPLETE_SUFFIX)) and not (writing and p.name.endswith(INCOMPLETE_SUFFIX))]
+        found = [p for p in root.iterdir() if _is_backup(p) and not (writing and p.name.endswith(INCOMPLETE_SUFFIX))]
         return [describe(p) for p in sorted(found, key=lambda p: p.name, reverse=True)]
 
     def folder(self, name: str) -> Path:
@@ -482,7 +639,8 @@ class BackupJobs:
 
         def work() -> dict:
             root = self.settings.backups_dir
-            root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            require_destination(root)
+            root.mkdir(exist_ok=True, mode=0o700)
             # Only this job writes here, and it is not running yet, so these are leftovers from a crash.
             for leftover in root.iterdir():
                 if leftover.name.endswith(INCOMPLETE_SUFFIX) and _NAME.fullmatch(leftover.name.removesuffix(INCOMPLETE_SUFFIX)):

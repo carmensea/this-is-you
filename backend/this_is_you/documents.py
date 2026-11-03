@@ -17,6 +17,7 @@ from .storage import OriginalStore, ReceivedFile, UploadRejected, not_a_pdf
 log = logging.getLogger("this_is_you.documents")
 
 PDF_MEDIA_TYPE = "application/pdf"
+RECOVERED_PREFIX = "Recovered file "
 
 
 def utc_now() -> str:
@@ -59,6 +60,8 @@ def record_upload(sessions: sessionmaker[Session], store: OriginalStore, receive
         document = session.scalar(select(Document).where(Document.sha256 == received.sha256))
         duplicate = document is not None
         now = utc_now()
+        if document is not None and document.original_filename.startswith(RECOVERED_PREFIX):
+            document.original_filename = filename  # The name was lost in a crash, and this upload knows it.
         if document is None:
             document = Document(sha256=received.sha256, original_filename=filename, media_type=PDF_MEDIA_TYPE, byte_size=received.byte_size, storage_key=key, imported_at=now)
             session.add(document)

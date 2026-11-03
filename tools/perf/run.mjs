@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { addSession, login, setPassphrase } from '../signin.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const { values: args } = parseArgs({
@@ -65,10 +66,12 @@ async function waitFor(url) {
   throw new Error(`${url} did not start`);
 }
 
+let session = null;
 async function startBackend(dataDir) {
   // Another backend on this port would answer with some other archive.
   const stale = await fetch(`http://127.0.0.1:${API_PORT}/api/status`).then(() => true, () => false);
   if (stale) throw new Error(`Port ${API_PORT} is already in use.`);
+  setPassphrase(path.join(REPO, 'backend/.venv/bin/python'), REPO, dataDir);
   const child = spawn(path.join(REPO, 'backend/.venv/bin/python'), ['-m', 'this_is_you'], {
     cwd: REPO,
     env: { ...process.env, THIS_IS_YOU_DATA_DIR: dataDir, THIS_IS_YOU_PORT: String(API_PORT) },
@@ -76,6 +79,7 @@ async function startBackend(dataDir) {
   });
   process.on('exit', () => child.kill());
   await waitFor(`http://127.0.0.1:${API_PORT}/api/status`);
+  session = await login(API_PORT);
   return async () => {
     child.kill('SIGTERM');
     await new Promise((r) => child.on('exit', r));
@@ -155,6 +159,7 @@ const INIT = () => {
 
 async function newPage(browser, name) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  if (session) await addSession(context, session);
   context.setDefaultTimeout(120000);
   await context.route('**/*', (route) => {
     const target = new URL(route.request().url());
@@ -397,7 +402,7 @@ async function apiTimes(archive) {
   const row = {};
   for (const route of ['status', 'documents', 'observations', 'lab-tests']) {
     const start = performance.now();
-    const body = await (await fetch(`http://127.0.0.1:${API_PORT}/api/${route}`)).text();
+    const body = await (await fetch(`http://127.0.0.1:${API_PORT}/api/${route}`, { headers: { Cookie: `tiy_session=${session}` } })).text();
     row[route] = { ms: Math.round(performance.now() - start), kb: Math.round(body.length / 1024) };
   }
   results.measures[`${archive} API`] = row;

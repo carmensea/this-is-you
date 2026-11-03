@@ -8,7 +8,9 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import BinaryIO
 
+from .sandbox import wrap
 from .worker import EXIT_MEMORY
 
 _STATUSES = {"extracted", "partial", "image_only", "encrypted", "no_text", "failed", "too_complex"}
@@ -98,15 +100,15 @@ def parse_output(stdout: bytes) -> ExtractionResult:
     )
 
 
-def worker_command(path: Path, limits: Limits, today: date) -> list[str]:
+def worker_command(limits: Limits, today: date) -> list[str]:
     payload = json.dumps({"cpu_seconds": limits.cpu_seconds, "memory_bytes": limits.memory_bytes, "max_pages": limits.max_pages, "max_chars": limits.max_chars})
     # -I ignores environment variables and the current directory, so nothing can steer what gets imported.
-    return [sys.executable, "-I", "-m", "this_is_you.extraction.worker", str(path), payload, today.isoformat()]
+    return [sys.executable, "-I", "-m", "this_is_you.extraction.worker", payload, today.isoformat()]
 
 
-def run_command(command: list[str], wall_seconds: float) -> ExtractionResult:
+def run_command(command: list[str], wall_seconds: float, document: BinaryIO | int = subprocess.DEVNULL) -> ExtractionResult:
     # stderr goes nowhere: it could hold document text, and this is what keeps it out of every log.
-    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env={}, close_fds=True, start_new_session=True)
+    process = subprocess.Popen(command, stdin=document, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env={}, close_fds=True, start_new_session=True)
     try:
         stdout, _ = process.communicate(timeout=wall_seconds)
     except subprocess.TimeoutExpired:
@@ -121,4 +123,8 @@ def run_command(command: list[str], wall_seconds: float) -> ExtractionResult:
 
 
 def extract(path: Path, limits: Limits = Limits(), today: date | None = None) -> ExtractionResult:
-    return run_command(worker_command(path, limits, today or date.today()), limits.wall_seconds)
+    try:
+        with path.open("rb") as document:
+            return run_command(wrap(worker_command(limits, today or date.today())), limits.wall_seconds, document)
+    except OSError:
+        return ExtractionResult("failed")

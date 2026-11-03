@@ -1,6 +1,6 @@
-"""One PDF, one process, then exit. Run by runner.py: python -I -m this_is_you.extraction.worker PATH LIMITS TODAY
+"""One PDF, one process, then exit. Run by runner.py: python -I -m this_is_you.extraction.worker LIMITS TODAY < PDF
 
-Prints a JSON summary and nothing else. The full text never leaves this process, and errors are reduced
+The document is standard input, already open, so this process needs no path to it or to the archive. Prints a JSON summary and nothing else. The full text never leaves this process, and errors are reduced
 to a status word so that document content cannot reach a log through a traceback.
 """
 from __future__ import annotations
@@ -40,6 +40,11 @@ def apply_limits(limits: dict) -> None:
             time.sleep(0.05)
 
     threading.Thread(target=watchdog, daemon=True).start()
+    resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))  # Python's own imports fit. Opening many files does not.
+    try:
+        resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))  # After the thread above: no more processes or threads.
+    except (ValueError, OSError):
+        pass
 
 
 def forbid_network() -> None:
@@ -62,7 +67,7 @@ def _has_image(page) -> bool:
         return False
 
 
-def read_pdf(path: str, limits: dict, today: date) -> dict:
+def read_pdf(source, limits: dict, today: date) -> dict:
     from pypdf import PdfReader
 
     from .lab_rows import parse_lab_rows
@@ -70,7 +75,7 @@ def read_pdf(path: str, limits: dict, today: date) -> dict:
 
     summary: dict = {"status": "failed", "page_count": None, "pages_read": 0, "pages_with_text": 0, "pages_failed": 0, "truncated": False, "text_sha256": None, "proposals": [], "lab_rows": [], "patient": None}
     try:
-        reader = PdfReader(path, strict=False)
+        reader = PdfReader(source, strict=False)
         if reader.is_encrypted:
             return {**summary, "status": "encrypted"}
         page_count = len(reader.pages)
@@ -130,14 +135,15 @@ def read_pdf(path: str, limits: dict, today: date) -> dict:
 
 
 def main() -> None:
-    path, limits, today = sys.argv[1], json.loads(sys.argv[2]), date.fromisoformat(sys.argv[3])
+    limits, today = json.loads(sys.argv[1]), date.fromisoformat(sys.argv[2])
     import pypdf  # noqa: F401  Loaded before limits apply, so its own size does not count against them.
+    from . import lab_rows, rules  # noqa: F401  Likewise, and they cannot be imported once file limits apply.
 
     apply_limits(limits)
     forbid_network()
     sys.setrecursionlimit(limits.get("recursion", 2000))
     try:
-        result = read_pdf(path, limits, today)
+        result = read_pdf(sys.stdin.buffer, limits, today)
     except (MemoryError, RecursionError):
         result = {"status": "too_complex"}
     except Exception:

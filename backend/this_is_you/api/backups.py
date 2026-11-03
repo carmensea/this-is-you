@@ -1,8 +1,12 @@
 """HTTP routes for backups. Restoring over an archive stays on the command line, with the service stopped."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 
+from ..backup import on_same_drive
+from ..extraction.sandbox import isolation
 from ..storage import UploadRejected
 
 router = APIRouter(prefix="/api/backups")
@@ -12,12 +16,22 @@ router = APIRouter(prefix="/api/backups")
 def list_backups(request: Request) -> dict:
     jobs = request.app.state.backups
     current = jobs.current
+    location = str(jobs.settings.backups_dir)
+    home = str(Path.home())
     return {
-        "location": str(jobs.settings.backups_dir),
+        # No account name, which a screen or screenshot has no need to show.
+        "location": "~" + location[len(home):] if location.startswith(home + "/") else location,
+        "same_drive": on_same_drive(jobs.settings.backups_dir, jobs.settings.data_dir),
         "backups": jobs.list(),
         "running": {k: current[k] for k in ("kind", "name", "done", "total") if k in current} if current else None,
         "last_result": jobs.last,
     }
+
+
+@router.get("/archive-health")
+def archive_health(request: Request) -> dict:
+    state = request.app.state
+    return {**vars(state.reconciled), "reader_isolation": isolation()}
 
 
 @router.post("", status_code=202)

@@ -139,9 +139,10 @@ def test_a_crash_between_file_and_record_loses_nothing_on_retry(data_dir, monkey
     monkeypatch.undo()
     client = client_for(data_dir)
     assert summary(client, batch)["counts"] == {"waiting": 1}
-    assert client.get("/api/documents").json()["documents"] == []
-    assert send(client, batch, item, files["Records/a.pdf"]).json()["state"] == "stored"
-    assert len(client.get("/api/documents").json()["documents"]) == 1
+    # The file is recovered on start. Sending it again finishes the report and gives it back its name.
+    assert [d["original_filename"][:15] for d in client.get("/api/documents").json()["documents"]] == ["Recovered file "]
+    assert send(client, batch, item, files["Records/a.pdf"]).json()["state"] == "duplicate"
+    assert [d["original_filename"] for d in client.get("/api/documents").json()["documents"]] == ["a.pdf"]
 
 
 def test_a_crash_while_reading_resumes_on_the_next_start(data_dir):
@@ -190,16 +191,18 @@ def test_a_rejected_file_can_be_retried_and_counts_its_attempts(client):
     assert row["state"] == "stored" and row["attempts"] == 2 and row["message"] is None
 
 
-def test_a_report_filters_pages_and_hides_without_deleting(client):
+def test_a_report_filters_pages_and_removes_only_itself(client):
     batch = start(client)
     run_all(client, batch)
     failed = report(client, batch, category="failed")
     assert failed["total"] == 3 and all(r["state"] == "rejected" for r in failed["items"])
     page = report(client, batch, limit=4, offset=8)
     assert page["total"] == len(MESSY) and len(page["items"]) == 3
-    assert client.post(f"/api/import-batches/{batch}/hide", headers=CLIENT_HEADERS).status_code == 204
+    documents = len(client.get("/api/documents").json()["documents"])
+    assert client.delete(f"/api/import-batches/{batch}", headers=CLIENT_HEADERS).status_code == 204
     assert client.get("/api/import-batches").json()["batches"] == []
-    assert report(client, batch)["total"] == len(MESSY)
+    assert client.get(f"/api/import-batches/{batch}/items").status_code == 404
+    assert len(client.get("/api/documents").json()["documents"]) == documents
 
 
 def test_batch_paths_are_only_text(client, data_dir):

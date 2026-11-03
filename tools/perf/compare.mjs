@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { addSession, login, setPassphrase } from '../signin.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const { values: args, positionals } = parseArgs({ options: { loads: { type: 'string', default: '7' } }, allowPositionals: true });
@@ -96,8 +97,10 @@ const INIT = () => {
 
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 
+let session = null;
 async function load(port, hash) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  await addSession(context, session);
   context.setDefaultTimeout(120000);
   // Nothing leaves this computer.
   await context.route(/^https?:/, (route) => (new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort()));
@@ -130,6 +133,7 @@ console.log('medians in ms, before > after');
 for (const [seed, hash] of CASES) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tiy-compare-'));
   fs.cpSync(path.join(SEED_ROOT, seed), dir, { recursive: true });
+  setPassphrase(path.join(REPO, 'backend/.venv/bin/python'), REPO, dir);
   const backend = spawn(path.join(REPO, 'backend/.venv/bin/python'), ['-m', 'this_is_you'], {
     cwd: REPO,
     env: { ...process.env, THIS_IS_YOU_DATA_DIR: dir, THIS_IS_YOU_PORT: String(API_PORT) },
@@ -140,6 +144,7 @@ for (const [seed, hash] of CASES) {
     if (await fetch(`http://127.0.0.1:${API_PORT}/api/status`).then(() => true, () => false)) break;
     await sleep(100);
   }
+  session = await login(API_PORT);
   const a = [];
   const b = [];
   for (let i = 0; i < +args.loads; i++) {

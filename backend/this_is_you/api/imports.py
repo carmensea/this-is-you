@@ -132,9 +132,9 @@ def retry_reading(request: Request, batch_id: BatchId, item: int | None = None) 
     return {"requeued": len(documents)}
 
 
-@router.post("/import-batches/{batch_id}/hide", status_code=204)
-def hide(request: Request, batch_id: BatchId) -> None:
-    service.hide_batch(request.app.state.sessions, batch_id)
+@router.delete("/import-batches/{batch_id}", status_code=204)
+def remove(request: Request, batch_id: BatchId) -> None:
+    service.remove_batch(request.app.state.sessions, batch_id)
 
 
 # ---- Identity

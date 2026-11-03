@@ -2,7 +2,7 @@
 import { addMonths, fLong } from '../domain/dates';
 import { rangeOnly, fmtR } from '../domain/format';
 import { DCATL } from '../domain/vocabulary';
-import type { Archive, ArchiveDocument, BackupListing, HealthEvent, IdentityDetails, ImportFile, ImportJob, ISODate, LowConfidenceNote, MetadataFieldKey, SnapshotMode } from '../domain/types';
+import type { Archive, ArchiveDocument, ArchiveHealth, BackupListing, HealthEvent, IdentityDetails, ImportFile, ImportJob, ISODate, LowConfidenceNote, MetadataFieldKey, SnapshotMode } from '../domain/types';
 import { ArchiveRequestError, type DocumentsBackend, type FieldDecision, type ObservationFieldValues } from '../services/archiveApi';
 import { FIELD_LABEL, FIELD_ORDER, displayValue, isReading } from '../domain/documentReview';
 import { listOnly, simulateProcessing } from '../services/importService';
@@ -118,6 +118,9 @@ export interface AppState {
   backups: BackupListing | null;
   /** Why the backups or identity details could not be loaded or saved. */
   safetyError: string | null;
+  archiveHealth: ArchiveHealth | null;
+  /** The service stopped accepting this session. No records are shown until signing in again. */
+  signedOut: boolean;
   /** Why the last decision on a real document could not be saved. */
   rvError: string | null;
   /** The page of the original to show, when following a proposal back to its source. */
@@ -181,6 +184,8 @@ export const initialState: AppState = {
   identityOpen: false,
   backups: null,
   safetyError: null,
+  archiveHealth: null,
+  signedOut: false,
   dz: false,
   rv: {},
   rvDoc: null,
@@ -465,12 +470,29 @@ export class AppStore {
     this.watchReading();
   };
 
+  afterSignIn = async () => {
+    this.setState({ signedOut: false });
+    await this.retryRefresh();
+    if (this.state.view === 'import') await this.imports.refresh();
+  };
+
+  /** Reloading drops every record this page holds in memory, and the sign-in screen comes back. */
+  signOut = async (everywhere: boolean) => {
+    if (!this.backend) return;
+    try {
+      await this.backend.signOut(everywhere);
+      window.location.reload();
+    } catch {
+      this.setState({ safetyError: 'The archive service did not answer, so you are still signed in.' });
+    }
+  };
+
   // Identity details and backups
   loadArchiveSafety = async () => {
     if (!this.backend) return;
     try {
-      const [identity, backups] = await Promise.all([this.backend.getIdentity(), this.backend.listBackups()]);
-      this.setState({ identity, backups, safetyError: null });
+      const [identity, backups, archiveHealth] = await Promise.all([this.backend.getIdentity(), this.backend.listBackups(), this.backend.getArchiveHealth()]);
+      this.setState({ identity, backups, archiveHealth, safetyError: null });
       if (backups.running) this.watchBackup();
     } catch {
       this.setState({ safetyError: 'Backups and identity details could not be loaded from the archive service.' });

@@ -96,7 +96,7 @@ export function importReportVM(store: AppStore) {
         : '',
     canRetry: !sending && failed + waiting > 0,
     onRetryAll: imports.retryFailures,
-    onHide: imports.hide,
+    onRemove: imports.remove,
     filters: [
       { key: 'all', label: 'All', n: batch?.total ?? 0, active: !r.category && !r.identity, onClick: () => imports.filter(null) },
       ...FILTERS.filter(([k]) => counts[k]).map(([k, label]) => ({

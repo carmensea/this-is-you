@@ -6,7 +6,7 @@ import { C, MONO, SERIF } from '../theme';
 import { s } from '../components/styles';
 import { shellVM } from '../viewmodels/shell';
 import { importVM } from '../viewmodels/importQueue';
-import { BackupsSection, IdentitySection } from './ArchiveSafety';
+import { AccessSection, BackupsSection, IdentitySection } from './ArchiveSafety';
 import { ImportReport } from './ImportReport';
 
 type VM = ReturnType<typeof shellVM> & ReturnType<typeof importVM>;
@@ -395,6 +395,7 @@ export function ImportScreen() {
       {!v.isDemo && <ManualResults v={v} />}
       {!v.isDemo && <IdentitySection />}
       {!v.isDemo && <BackupsSection />}
+      {!v.isDemo && <AccessSection />}
       <Footer />
     </main>
   );
