@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { DemoBanner, Header, Notice, SnapshotBar } from './components/AppShell';
+import { DemoBanner, Header, Notice, SnapshotBar, StaleNotice } from './components/AppShell';
 import { BiomarkersScreen } from './screens/BiomarkersScreen';
 import { CompareScreen } from './screens/CompareScreen';
 import { DocumentsScreen } from './screens/DocumentsScreen';
@@ -19,7 +19,7 @@ const NEEDS_RECORDS: View[] = ['overview', 'biomarkers', 'history', 'compare'];
 
 export function App() {
   const store = useStore();
-  const { view, rvDoc, notice } = store.state;
+  const { view, rvDoc, notice, archiveStale } = store.state;
 
   // Keeps the address bar and the back button in step with the current screen.
   useEffect(() => {
@@ -45,6 +45,7 @@ export function App() {
       <Header v={v} />
       {isDemo && <DemoBanner />}
       {notice && <Notice v={v} />}
+      {archiveStale && <StaleNotice onRetry={store.retryRefresh} />}
       {view !== 'overview' && !blocked && <SnapshotBar v={v} />}
       {blocked && <NoRecordsYet />}
       {!blocked && view === 'overview' && <OverviewScreen />}

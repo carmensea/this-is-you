@@ -13,13 +13,19 @@ import type {
   MetadataFieldState,
   MetadataProposal,
   LabObservation,
+  IdentityCheck,
+  ImportBatchSummary,
+  ImportReportItem,
 } from '../domain/types';
 import {
+  ArchiveReadError,
   ArchiveRequestError,
   type ArchiveApi,
   type DocumentsBackend,
   type FieldDecision,
-  type UploadResult,
+  type ItemUpload,
+  type ListedItem,
+  type ReportQuery,
 } from './archiveApi';
 
 const CLIENT_HEADER = 'X-This-Is-You-Client';
@@ -48,6 +54,7 @@ export interface DocumentDto {
   truncated: boolean;
   metadata: Record<MetadataFieldKey, FieldDto>;
   possible_duplicates: string[];
+  identity?: IdentityCheck;
 }
 
 const localDate = (d: Date) =>
@@ -94,6 +101,7 @@ export function toArchiveDocument(dto: DocumentDto): ArchiveDocument {
     dto.possible_duplicates.length
       ? 'Possible duplicate: another file in the archive has the same text. Both are kept.'
       : undefined,
+    dto.identity && dto.identity.status !== 'not_configured' ? dto.identity.reason : undefined,
     verifiedDate ? undefined : "The date shown is the import date. This document's own date has not been verified.",
   ].filter(Boolean);
   const status: DocumentStatus =
@@ -150,6 +158,7 @@ export function toArchiveDocument(dto: DocumentDto): ArchiveDocument {
       fields,
       possibleDuplicates: dto.possible_duplicates,
       observations: [],
+      identity: dto.identity,
     },
   };
 }
@@ -194,10 +203,28 @@ export function emptyPersonalArchive(today: string): Archive {
   };
 }
 
-async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
-  return response.json() as Promise<T>;
+// A read can fail for a moment: a dropped connection, or a service that is just starting. Reads change nothing,
+// so trying again is safe, and a few short tries cover those moments. After that, the person decides.
+export const READ_RETRY_DELAYS_MS = [250, 750, 1500];
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function getJson<T>(url: string, delays = READ_RETRY_DELAYS_MS): Promise<T> {
+  let failure = new ArchiveReadError('unreachable');
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      // Only this service sends this header, so a proxy's error page is not mistaken for its answer.
+      const fromService = response.headers.get('x-content-type-options') === 'nosniff';
+      if (response.ok && fromService) return (await response.json()) as T;
+      failure = new ArchiveReadError(fromService ? 'error' : 'unreachable');
+      if (fromService && response.status < 500) throw failure;
+    } catch (problem) {
+      if (problem === failure) throw problem;
+      failure = new ArchiveReadError(problem instanceof SyntaxError ? 'error' : 'unreachable');
+    }
+    if (attempt >= delays.length) throw failure;
+    await wait(delays[attempt]);
+  }
 }
 
 export const listObservations = async () =>
@@ -206,11 +233,11 @@ export const listObservations = async () =>
 export const listDocuments = async () =>
   (await getJson<{ documents: DocumentDto[] }>('/api/documents')).documents.map(toArchiveDocument);
 
-async function post<T>(url: string, body?: unknown): Promise<T> {
+async function post<T>(url: string, body?: unknown, method = 'POST'): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {
-      method: 'POST',
+      method,
       headers: { [CLIENT_HEADER]: '1', 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -224,47 +251,33 @@ async function post<T>(url: string, body?: unknown): Promise<T> {
 
 const send = async (url: string, body?: unknown) => toArchiveDocument(await post<DocumentDto>(url, body));
 
-function upload(file: File, onProgress: (fraction: number) => void): Promise<UploadResult> {
-  return new Promise((resolve) => {
-    const failed = () =>
-      resolve({ kind: 'failed', message: 'The upload did not finish. Nothing was stored. Try again.' });
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/documents');
-    xhr.setRequestHeader('Content-Type', 'application/pdf');
-    xhr.setRequestHeader(CLIENT_HEADER, '1');
-    // Sent as a header and encoded, because filenames can hold any character.
-    xhr.setRequestHeader('X-Original-Filename', encodeURIComponent(file.name));
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(e.loaded / e.total);
-    };
-    xhr.onerror = failed;
-    xhr.onabort = failed;
-    xhr.onload = () => {
-      let body: { duplicate?: boolean; document?: DocumentDto; message?: string } | null = null;
-      try {
-        body = JSON.parse(xhr.responseText);
-      } catch {
-        // A proxy error page rather than our service. Handled below.
-      }
-      if (xhr.status >= 200 && xhr.status < 300 && body?.document) {
-        const document = toArchiveDocument(body.document);
-        resolve(body.duplicate ? { kind: 'duplicate', document } : { kind: 'stored', document });
-      } else if (body?.message) {
-        resolve({ kind: 'rejected', message: body.message });
-      } else {
-        failed();
-      }
-    };
-    xhr.send(file);
-  });
+/** Sends one file as a stream: the browser reads it from disk as it goes, so it is never all in memory. */
+async function uploadBatchItem(batchId: string, itemId: number, file: File): Promise<ItemUpload> {
+  try {
+    const response = await fetch(`/api/import-batches/${batchId}/items/${itemId}/file`, {
+      method: 'POST',
+      headers: { [CLIENT_HEADER]: '1', 'Content-Type': 'application/pdf' },
+      body: file,
+    });
+    if (!response.ok) return { kind: 'unreachable' };
+    return { kind: 'answered', item: (await response.json()) as ImportReportItem };
+  } catch {
+    return { kind: 'unreachable' };
+  }
 }
+
+const reportUrl = (batchId: string, { category, identity, limit }: ReportQuery) => {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (category) query.set('category', category);
+  if (identity) query.set('identity', identity);
+  return `/api/import-batches/${batchId}/items?${query}`;
+};
 
 export async function connectLocalArchive(): Promise<{ api: ArchiveApi; backend: DocumentsBackend }> {
   const status = await getJson<{ max_upload_bytes: number }>('/api/status');
   const backend: DocumentsBackend = {
     maxUploadBytes: status.max_upload_bytes,
     listDocuments,
-    upload,
     decide: (id, field, decision: FieldDecision) => send(`/api/documents/${id}/metadata/${field}`, decision),
     setReview: (id, complete) => send(`/api/documents/${id}/review`, { complete }),
     readAgain: (id) => send(`/api/documents/${id}/extract`),
@@ -274,6 +287,20 @@ export async function connectLocalArchive(): Promise<{ api: ArchiveApi; backend:
     verifyObservations: (ids) => post('/api/observations/verify', { ids }),
     createObservation: (fields, documentId, verify) =>
       post<LabObservation>('/api/observations', { fields, document_id: documentId, verify }),
+    createBatch: async (label) => (await post<{ id: string }>('/api/import-batches', { label })).id,
+    addBatchItems: async (batchId, files) =>
+      (await post<{ items: ListedItem[] }>(`/api/import-batches/${batchId}/items`, { items: files })).items,
+    uploadBatchItem,
+    listBatches: async () => (await getJson<{ batches: ImportBatchSummary[] }>('/api/import-batches', [])).batches,
+    listBatchItems: (batchId, query) => getJson(reportUrl(batchId, query), []),
+    retryReading: (batchId, itemId) =>
+      post(`/api/import-batches/${batchId}/retry-reading${itemId === undefined ? '' : `?item=${itemId}`}`),
+    hideBatch: (batchId) => post(`/api/import-batches/${batchId}/hide`),
+    getIdentity: () => getJson('/api/identity'),
+    saveIdentity: (details) => post('/api/identity', details, 'PUT'),
+    listBackups: () => getJson('/api/backups', []),
+    startBackup: () => post('/api/backups'),
+    checkBackup: (name) => post(`/api/backups/${name}/check`),
   };
   const api: ArchiveApi = {
     loadArchive: async () => {

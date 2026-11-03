@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from .models import Document, ExtractionRun, ImportEvent, ImportOutcome, MetadataDecision
+from .models import Document, ExtractionRun, ImportEvent, ImportItem, ImportItemState, ImportOutcome, MetadataDecision
 from .storage import OriginalStore, ReceivedFile, UploadRejected, not_a_pdf
 
 # Log ids and sizes only. Filenames and contents are health information and never go in a log.
@@ -41,8 +41,19 @@ def clean_filename(header_value: str | None) -> str:
     return name
 
 
-def record_upload(sessions: sessionmaker[Session], store: OriginalStore, received: ReceivedFile, filename: str) -> tuple[Document, bool]:
-    """Store the file and its metadata. Returns the document and whether it already existed."""
+def _settle_item(session: Session, item_id: int | None, document: Document, duplicate: bool, now: str) -> None:
+    if item_id is None:
+        return
+    item = session.get(ImportItem, item_id)
+    assert item is not None
+    item.state, item.document, item.message, item.updated_at = (ImportItemState.DUPLICATE if duplicate else ImportItemState.STORED), document, None, now
+
+
+def record_upload(sessions: sessionmaker[Session], store: OriginalStore, received: ReceivedFile, filename: str, item_id: int | None = None) -> tuple[Document, bool]:
+    """Store the file and its metadata. Returns the document and whether it already existed.
+
+    A batch item changes in the same transaction, so a crash cannot leave a document its report does not know.
+    """
     key = store.commit(received)  # File first: a crash here leaves an unlisted file, never a broken listing.
     with sessions() as session:
         document = session.scalar(select(Document).where(Document.sha256 == received.sha256))
@@ -52,6 +63,7 @@ def record_upload(sessions: sessionmaker[Session], store: OriginalStore, receive
             document = Document(sha256=received.sha256, original_filename=filename, media_type=PDF_MEDIA_TYPE, byte_size=received.byte_size, storage_key=key, imported_at=now)
             session.add(document)
         session.add(ImportEvent(document=document, submitted_filename=filename, outcome=ImportOutcome.DUPLICATE if duplicate else ImportOutcome.STORED, occurred_at=now))
+        _settle_item(session, item_id, document, duplicate, now)
         try:
             session.commit()
         except IntegrityError:
@@ -60,6 +72,7 @@ def record_upload(sessions: sessionmaker[Session], store: OriginalStore, receive
             document = session.scalars(select(Document).where(Document.sha256 == received.sha256)).one()
             duplicate = True
             session.add(ImportEvent(document=document, submitted_filename=filename, outcome=ImportOutcome.DUPLICATE, occurred_at=now))
+            _settle_item(session, item_id, document, True, now)
             session.commit()
         document_id = document.id
     document = get_document(sessions, document_id)

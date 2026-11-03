@@ -1,5 +1,15 @@
 // The seam between the app and its data. Screens read only the Archive an implementation returns.
-import type { Archive, ArchiveDocument, LabObservation, MetadataFieldKey } from '../domain/types';
+import type {
+  Archive,
+  ArchiveDocument,
+  BackupListing,
+  IdentityDetails,
+  ImportBatchSummary,
+  ImportCategory,
+  ImportReportItem,
+  LabObservation,
+  MetadataFieldKey,
+} from '../domain/types';
 
 export interface ArchiveApi {
   loadArchive(): Promise<Archive>;
@@ -20,19 +30,31 @@ export class ArchiveRequestError extends Error {
   }
 }
 
-export type UploadResult =
-  | { kind: 'stored'; document: ArchiveDocument }
-  | { kind: 'duplicate'; document: ArchiveDocument }
-  /** The service refused the file. Nothing was stored. */
-  | { kind: 'rejected'; message: string }
-  /** The upload did not finish. Nothing was stored. */
-  | { kind: 'failed'; message: string };
+/** Why a read failed: the service could not be reached, or it answered with an error. An empty archive is neither. */
+export class ArchiveReadError extends Error {
+  constructor(readonly kind: 'unreachable' | 'error') {
+    super(kind);
+  }
+}
+
+export type ItemUpload =
+  /** The service decided, and the report row says what it decided. */
+  | { kind: 'answered'; item: ImportReportItem }
+  /** The file never reached a decision. Nothing was stored, and sending it again is safe. */
+  | { kind: 'unreachable' };
+
+export interface ListedFile {
+  path: string;
+  size: number;
+  modified: number;
+}
+export type ListedItem = { id: number; path: string; state: ImportReportItem['state'] };
+export type ReportQuery = { category: ImportCategory | null; identity: string | null; limit: number };
 
 /** The operations only a real archive has. The demo archive has no backend at all. */
 export interface DocumentsBackend {
   maxUploadBytes: number;
   listDocuments(): Promise<ArchiveDocument[]>;
-  upload(file: File, onProgress: (fraction: number) => void): Promise<UploadResult>;
   decide(id: string, field: MetadataFieldKey, decision: FieldDecision): Promise<ArchiveDocument>;
   setReview(id: string, complete: boolean): Promise<ArchiveDocument>;
   readAgain(id: string): Promise<ArchiveDocument>;
@@ -45,4 +67,16 @@ export interface DocumentsBackend {
     documentId: string | null,
     verify: boolean,
   ): Promise<LabObservation>;
+  createBatch(label: string): Promise<string>;
+  addBatchItems(batchId: string, files: ListedFile[]): Promise<ListedItem[]>;
+  uploadBatchItem(batchId: string, itemId: number, file: File): Promise<ItemUpload>;
+  listBatches(): Promise<ImportBatchSummary[]>;
+  listBatchItems(batchId: string, query: ReportQuery): Promise<{ items: ImportReportItem[]; total: number }>;
+  retryReading(batchId: string, itemId?: number): Promise<unknown>;
+  hideBatch(batchId: string): Promise<unknown>;
+  getIdentity(): Promise<IdentityDetails>;
+  saveIdentity(details: Omit<IdentityDetails, 'configured'>): Promise<IdentityDetails>;
+  listBackups(): Promise<BackupListing>;
+  startBackup(): Promise<unknown>;
+  checkBackup(name: string): Promise<unknown>;
 }

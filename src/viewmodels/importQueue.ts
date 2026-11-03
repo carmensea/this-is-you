@@ -5,8 +5,9 @@ import { OUTCOME } from '../domain/vocabulary';
 import type { ObservationFields } from '../components/ObservationForm';
 import { C } from '../theme';
 import type { AppStore } from '../state/store';
-import type { ArchiveDocument, ImportJob, ImportOutcome } from '../domain/types';
-import { EXTRACTION_LABEL, FIELD_ORDER, canReview, isReading, proposalCount } from '../domain/documentReview';
+import type { ImportJob, ImportOutcome } from '../domain/types';
+import { FIELD_ORDER, canReview } from '../domain/documentReview';
+import { collectDropped } from '../services/droppedFiles';
 
 /** Opens the browser file picker. */
 function chooseFiles(store: AppStore, folder: boolean) {
@@ -54,38 +55,12 @@ const DEMO_COPY = {
   ],
 };
 
-/** Once a real upload is stored, its row follows what the reader and the person have done since. */
-function realRow(d: ArchiveDocument | undefined, f: ImportJob) {
-  if (!d?.review || f.outcome !== 'stored') return {};
-  const r = d.review;
-  const read = !isReading(d) && r.extraction !== 'failed';
-  const reading = isReading(d);
-  const count = proposalCount(r);
-  const label = reading
-    ? 'Stored, being read'
-    : r.review === 'completed'
-      ? 'Reviewed'
-      : count
-        ? 'Stored, ready for review'
-        : 'Stored, needs details by hand';
-  return {
-    statusLabel: label,
-    statusColor: reading ? C.ink2 : r.review === 'completed' ? C.green : count ? C.amber : C.rust,
-    result: reading
-      ? 'Stored unchanged on this computer. Reading its text now.'
-      : `Stored unchanged. ${EXTRACTION_LABEL[r.extraction]}. ${count ? plural(count, 'detail') + ' proposed, none verified yet.' : 'No details could be proposed.'}`,
-    p2: read ? C.ink : 'transparent',
-    p3: count ? C.ink : 'transparent',
-    p4: r.review === 'completed' ? C.ink : 'transparent',
-  };
-}
-
 const personalCopy = (maxBytes: number): typeof DEMO_COPY => ({
   headNote:
     'Files stay on this computer. Each PDF is stored unchanged, then read here to propose basic details for you to check. Nothing is sent anywhere.',
-  dropTitle: 'Drop PDF files here',
+  dropTitle: 'Drop PDF files or folders here',
   dropBody:
-    'Each original is copied into the archive on this computer, unchanged. An identical file is recognized and set aside instead of being stored twice. Nothing counts as verified until you confirm it.',
+    'Each original is copied into the archive on this computer, unchanged. An identical file is recognized and set aside instead of being stored twice. Every file gets a line in the report, which stays here if you close the browser. Nothing counts as verified until you confirm it.',
   formats: `PDF only · up to ${Math.floor(maxBytes / 1048576)} MB per file`,
   readTitle: 'What can be imported',
   readRows: [
@@ -101,7 +76,7 @@ const personalCopy = (maxBytes: number): typeof DEMO_COPY => ({
     {
       k: 'Other',
       warn: true,
-      text: 'Not accepted yet. Images, Word documents and other formats are turned away, and nothing is stored.',
+      text: 'Not accepted yet. Images, Word documents and other formats are listed in the report as not copied, and nothing is stored.',
     },
   ],
   steps: [
@@ -119,7 +94,7 @@ export function importVM(store: AppStore) {
   const count = (o: ImportOutcome) => imp.filter((f) => f.done && f.outcome === o).length;
   const personal = archive.kind === 'personal';
   const stage = (f: ImportJob) =>
-    f.done ? '' : personal ? 'Uploading' : f.pct < 25 ? 'Storing original' : f.pct < 60 ? 'Reading' : 'Extracting';
+    f.done ? '' : f.pct < 25 ? 'Storing original' : f.pct < 60 ? 'Reading' : 'Extracting';
   const out = {
     dzBg: s.dz ? '#EDE9DF' : '#FBFAF6',
     dzBorder: s.dz ? '#1F1E1B' : '#6E6A61',
@@ -131,8 +106,12 @@ export function importVM(store: AppStore) {
     onDrop: (e: DragEvent) => {
       e.preventDefault();
       store.setState({ dz: false });
-      const fl = Array.from(e.dataTransfer?.files ?? []);
-      if (fl.length) store.receiveFiles(fl);
+      // Folder contents can only be reached during the drop event, so this starts before anything waits.
+      if (personal) void collectDropped(e.dataTransfer).then((fl) => fl.length && store.receiveFiles(fl));
+      else {
+        const fl = Array.from(e.dataTransfer?.files ?? []);
+        if (fl.length) store.receiveFiles(fl);
+      }
     },
     pickFiles: () => chooseFiles(store, false),
     pickFolder: () => chooseFiles(store, true),
@@ -143,17 +122,7 @@ export function importVM(store: AppStore) {
     copy: personal ? personalCopy(store.maxUploadBytes) : DEMO_COPY,
     impSummary: !imp.length
       ? ''
-      : personal
-        ? plural(imp.length, 'file') +
-          ' received. ' +
-          count('stored') +
-          ' stored, ' +
-          count('duplicate') +
-          ' duplicate, set aside, ' +
-          (count('rejected') + count('interrupted')) +
-          ' not stored.' +
-          (imp.some((f) => !f.done) ? ' Uploading.' : '')
-        : plural(imp.length, 'file') +
+      : plural(imp.length, 'file') +
           ' received. ' +
           imp.filter((f) => f.pct >= 25 || f.done).length +
           ' originals stored. ' +
@@ -165,14 +134,14 @@ export function importVM(store: AppStore) {
           ' failed, ' +
           count('unsupported') +
           ' unsupported.' +
-          (imp.some((f) => !f.done) ? ' Processing.' : ''),
+        (imp.some((f) => !f.done) ? ' Processing.' : ''),
     impRows: imp.map((f) => {
       const o = OUTCOME[f.outcome];
-      const stored = personal ? f.outcome === 'stored' || f.outcome === 'duplicate' : f.pct >= 25 || f.done;
+      const stored = f.pct >= 25 || f.done;
       return {
         name: f.name,
         size: f.size,
-        kind: personal || f.done || f.pct >= 60 ? f.kind : 'Detecting type',
+        kind: f.done || f.pct >= 60 ? f.kind : 'Detecting type',
         pct: String(f.pct),
         isRunning: !f.done,
         isDone: f.done,
@@ -181,11 +150,10 @@ export function importVM(store: AppStore) {
         statusLabel: f.done ? o.label : 'In progress',
         statusColor: f.done ? o.color : C.ink2,
         p1: stored ? C.ink : 'transparent',
-        p2: personal ? 'transparent' : f.done && o.read ? C.ink : !f.done && f.pct >= 60 ? C.ink : 'transparent',
-        ...realRow(archive.documentsById[f.documentId ?? ''], f),
+        p2: f.done && o.read ? C.ink : !f.done && f.pct >= 60 ? C.ink : 'transparent',
         documentId: f.documentId,
         onView: () => store.go('documents', { dSel: f.documentId ?? null, dPage: 0, dHL: null }),
-        p3: !personal && f.done && o.ext ? C.ink : 'transparent',
+        p3: f.done && o.ext ? C.ink : 'transparent',
         p4: 'transparent',
       };
     }),

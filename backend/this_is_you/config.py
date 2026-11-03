@@ -24,6 +24,7 @@ class Settings:
     port: int = 8000
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     extraction_limits: Limits = Limits()
+    backups_dir_override: Path | None = None
 
     @property
     def database_path(self) -> Path:
@@ -36,6 +37,11 @@ class Settings:
     @property
     def incoming_dir(self) -> Path:
         return self.data_dir / "incoming"
+
+    @property
+    def backups_dir(self) -> Path:
+        # Beside the archive, not in it. Point this at another drive to survive losing this one.
+        return self.backups_dir_override or self.data_dir.with_name(self.data_dir.name + " Backups")
 
 
 def default_data_dir(env: Mapping[str, str] = os.environ) -> Path:
@@ -76,6 +82,11 @@ def validate(settings: Settings) -> Settings:
             f"Refusing to store documents inside the Git repository at {repository}. "
             "Choose a data directory outside it."
         )
+    backups = settings.backups_dir.expanduser().resolve()
+    if enclosing_git_repository(backups) is not None:
+        raise UnsafeConfiguration("Refusing to keep backups inside a Git repository. Choose a folder outside it.")
+    if backups.is_relative_to(settings.data_dir.expanduser().resolve()):
+        raise UnsafeConfiguration("Refusing to keep backups inside the archive folder. Choose a folder outside it.")
     if settings.max_upload_bytes <= 0:
         raise UnsafeConfiguration("THIS_IS_YOU_MAX_UPLOAD_BYTES must be positive.")
     return settings
@@ -89,5 +100,6 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
             host=env.get("THIS_IS_YOU_HOST", "127.0.0.1"),
             port=int(env.get("THIS_IS_YOU_PORT", "8000")),
             max_upload_bytes=int(env.get("THIS_IS_YOU_MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES)),
+            backups_dir_override=Path(env["THIS_IS_YOU_BACKUP_DIR"]).expanduser() if env.get("THIS_IS_YOU_BACKUP_DIR") else None,
         )
     )

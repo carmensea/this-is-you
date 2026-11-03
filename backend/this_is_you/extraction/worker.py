@@ -66,9 +66,9 @@ def read_pdf(path: str, limits: dict, today: date) -> dict:
     from pypdf import PdfReader
 
     from .lab_rows import parse_lab_rows
-    from .rules import propose_all
+    from .rules import find_patient, propose_all
 
-    summary: dict = {"status": "failed", "page_count": None, "pages_read": 0, "pages_with_text": 0, "pages_failed": 0, "truncated": False, "text_sha256": None, "proposals": [], "lab_rows": []}
+    summary: dict = {"status": "failed", "page_count": None, "pages_read": 0, "pages_with_text": 0, "pages_failed": 0, "truncated": False, "text_sha256": None, "proposals": [], "lab_rows": [], "patient": None}
     try:
         reader = PdfReader(path, strict=False)
         if reader.is_encrypted:
@@ -116,6 +116,7 @@ def read_pdf(path: str, limits: dict, today: date) -> dict:
     except Exception:
         embedded = None
     summary["proposals"] = [p.as_dict() for p in propose_all(pages, embedded if isinstance(embedded, str) else None, today)]
+    summary["patient"] = find_patient(pages, today)
     rows = parse_lab_rows(pages, today)
     if not rows:
         # Tables often come out as separate lines in the default mode. Layout mode keeps columns together.

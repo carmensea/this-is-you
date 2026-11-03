@@ -53,7 +53,10 @@ const serve = (dist, port) =>
           res.writeHead(r.statusCode, r.headers);
           r.pipe(res);
         });
+        // The page can close before or during the answer. Left unread, the answer stops the service from exiting.
+        res.on('close', () => up.destroy());
         up.on('error', (e) => {
+          if (res.destroyed) return;
           // A failed request puts the app on its error screen, whose timings would be counted as a fast load.
           console.log(`FAIL ${url} ${e.code}: this run is not valid`);
           process.exitCode = 1;
@@ -146,7 +149,13 @@ for (const [seed, hash] of CASES) {
   const cell = (key) => `${key} ${median(a.map((r) => r[key] ?? 0))} > ${median(b.map((r) => r[key] ?? 0))}`;
   console.log(seed.padEnd(6), hash.padEnd(18), ['text', 'chart', 'longest'].map(cell).join('   '));
   backend.kill();
+  const force = setTimeout(() => {
+    console.log('FAIL the service did not stop within 15 s');
+    process.exitCode = 1;
+    backend.kill('SIGKILL');
+  }, 15000);
   await new Promise((r) => backend.on('exit', r));
+  clearTimeout(force);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 await browser.close();

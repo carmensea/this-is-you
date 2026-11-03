@@ -15,7 +15,8 @@
     "test:backend": "cd backend && .venv/bin/pytest",
     "test:all": "vitest run && cd backend && .venv/bin/pytest",
     "perf": "node tools/perf/run.mjs",
-    "perf:compare": "node tools/perf/compare.mjs"
+    "perf:compare": "node tools/perf/compare.mjs",
+    "readiness": "node tools/readiness/run.mjs"
   },
   "dependencies": {
     "@fontsource-variable/newsreader": "^5.3.0",

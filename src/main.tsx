@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { ArchiveUnavailable } from './screens/ArchiveUnavailable';
+import { ArchiveReadError } from './services/archiveApi';
 import { isDemoMode, viewFromHash } from './services/archiveMode';
 import { connectLocalArchive } from './services/localArchiveApi';
 import { AppStore } from './state/store';
@@ -35,9 +36,10 @@ async function start() {
     new AppStore(archive, { view: viewFromHash() ?? 'documents', cur: archive.today }, backend);
     show(store);
     store.watchReading();
-  } catch {
+  } catch (problem) {
     // Never fall back to the demo here: fictional records must not stand in for someone's own.
-    root.render(<ArchiveUnavailable onRetry={start} />);
+    const kind = problem instanceof ArchiveReadError ? problem.kind : 'error';
+    root.render(<ArchiveUnavailable kind={kind} onRetry={start} />);
   }
 }
 

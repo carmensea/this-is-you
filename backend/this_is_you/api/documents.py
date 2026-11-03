@@ -12,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from starlette.requests import ClientDisconnect
 
 from .. import documents as service
-from .. import metadata
+from .. import identity, metadata
 from ..models import DecisionAction, Document, MetadataField
 from ..schemas import DecisionOut, DocumentDetail, DocumentList, DocumentOut, ImportEventOut, RunOut, UploadResult
 from ..storage import UploadRejected, too_large
@@ -32,7 +32,7 @@ def _detail(request: Request, document_id: str) -> DocumentDetail:
     if document is None:
         raise _not_found()
     return DocumentDetail(
-        **DocumentOut.of(document, metadata.possible_duplicates(sessions)).model_dump(),
+        **DocumentOut.of(document, metadata.possible_duplicates(sessions), identity.load_profile(sessions)).model_dump(),
         imports=[ImportEventOut(submitted_filename=e.submitted_filename, outcome=e.outcome.value, occurred_at=e.occurred_at) for e in document.imports],
         decisions=[DecisionOut.of(d) for d in document.decisions],
         runs=[RunOut(method=r.method, status=r.status.value, finished_at=r.finished_at, page_count=r.page_count, pages_read=r.pages_read) for r in document.runs],
@@ -42,12 +42,12 @@ def _detail(request: Request, document_id: str) -> DocumentDetail:
 MAX_JSON_BYTES = 16 * 1024
 
 
-async def read_json(request: Request, model: type[BaseModel]):
+async def read_json(request: Request, model: type[BaseModel], limit: int = MAX_JSON_BYTES):
     """Reads a small JSON body, stopping as soon as it passes the cap."""
     body = b""
     async for chunk in request.stream():
         body += chunk
-        if len(body) > MAX_JSON_BYTES:
+        if len(body) > limit:
             raise UploadRejected(413, "too_large", "This request is too large.")
     try:
         return model.model_validate(json.loads(body))
@@ -69,7 +69,8 @@ class ReviewBody(BaseModel):
 def list_documents(request: Request) -> DocumentList:
     sessions = request.app.state.sessions
     duplicates = metadata.possible_duplicates(sessions)
-    return DocumentList(documents=[DocumentOut.of(d, duplicates) for d in service.list_documents(sessions)])
+    profile = identity.load_profile(sessions)
+    return DocumentList(documents=[DocumentOut.of(d, duplicates, profile) for d in service.list_documents(sessions)])
 
 
 @router.post("", response_model=UploadResult, status_code=201)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import enum
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Enum, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, BigInteger, Boolean, Enum, Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -105,6 +105,17 @@ class ImportOutcome(str, enum.Enum):
     DUPLICATE = "duplicate"
 
 
+class ImportItemState(str, enum.Enum):
+    """What happened to one file of a batch. Reading and review are tracked on its document."""
+
+    PENDING = "pending"  # Listed, and not yet received.
+    STORED = "stored"
+    DUPLICATE = "duplicate"  # These bytes were already in the archive.
+    UNSUPPORTED = "unsupported"  # Not a PDF, or over the size limit. Never sent.
+    REJECTED = "rejected"  # Arrived, but is not a readable PDF. Nothing was stored.
+    INTERRUPTED = "interrupted"  # The upload stopped partway. Nothing was stored.
+
+
 def _stored_as_value(enum_cls: type[enum.Enum]) -> Enum:
     # Plain strings with no database constraint, so adding a value needs no table rebuild.
     return Enum(enum_cls, native_enum=False, create_constraint=False, length=32, values_callable=lambda e: [m.value for m in e])
@@ -166,6 +177,8 @@ class ExtractionRun(Base):
     truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Hash of the normalized text, to notice the same report saved as a different file.
     text_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    # Names and birth dates printed under a patient label. Empty when the file could not be read.
+    patient_found: Mapped[dict | None] = mapped_column(JSON)
 
     document: Mapped[Document] = relationship(back_populates="runs")
     proposals: Mapped[list["MetadataProposal"]] = relationship(back_populates="run", order_by="MetadataProposal.id")
@@ -260,3 +273,47 @@ class ObservationRevision(Base):
     occurred_at: Mapped[str] = mapped_column(String(32), nullable=False)
 
     observation: Mapped[Observation] = relationship(back_populates="revisions")
+
+
+class ImportBatch(Base):
+    """One folder or set of files a person chose. Lives here so the report outlasts the browser."""
+
+    __tablename__ = "import_batches"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid4().hex)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ImportItem(Base):
+    """One file of a batch. Changes in the same transaction as the document it produces."""
+
+    __tablename__ = "import_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("import_batches.id"), nullable=False)
+    path: Mapped[str] = mapped_column(String(1024), nullable=False)  # Display text, never used to open a file.
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    modified_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    state: Mapped[ImportItemState] = mapped_column(_stored_as_value(ImportItemState), nullable=False)
+    message: Mapped[str | None] = mapped_column(String(300))
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id"), index=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    document: Mapped[Document | None] = relationship()
+
+    __table_args__ = (UniqueConstraint("batch_id", "path", name="uq_import_items_batch_path"), Index("ix_import_items_batch_state", "batch_id", "state"))
+
+
+class IdentityProfile(Base):
+    """One row at most. Compared with what documents print, only to raise a flag for a person to check."""
+
+    __tablename__ = "identity_profile"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    date_of_birth: Mapped[str | None] = mapped_column(String(10))
+    previous_names: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    updated_at: Mapped[str] = mapped_column(String(32), nullable=False)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from .identity import Profile, assess
 from .metadata import FIELDS, current_decisions, current_proposals
 from .lab_catalog import BY_CODE, canonical_unit
 from .models import Document, MetadataDecision, MetadataProposal, Observation, RevisionAction
@@ -31,6 +32,15 @@ class FieldOut(BaseModel):
     proposal: ProposalOut | None
 
 
+class IdentityOut(BaseModel):
+    """A suggestion for a person to check. Never a verification, and never a reason to refuse a document."""
+
+    status: str  # not_configured, undetermined, possible_match or possible_mismatch
+    reason: str
+    names_found: list[str]
+    birth_dates_found: list[str]
+
+
 class DocumentOut(BaseModel):
     id: str
     original_filename: str
@@ -48,9 +58,10 @@ class DocumentOut(BaseModel):
     truncated: bool
     metadata: dict[str, FieldOut]
     possible_duplicates: list[str]
+    identity: IdentityOut
 
     @classmethod
-    def of(cls, d: Document, duplicates: dict[str, list[str]] | None = None) -> "DocumentOut":
+    def of(cls, d: Document, duplicates: dict[str, list[str]] | None = None, profile: Profile | None = None) -> "DocumentOut":
         proposals, decisions = current_proposals(d), current_decisions(d)
         method = d.runs[-1].method if d.runs else ""
         fields: dict[str, FieldOut] = {}
@@ -69,6 +80,7 @@ class DocumentOut(BaseModel):
             verification_status=d.verification_status.value, page_count=run.page_count if run else None, pages_read=run.pages_read if run else 0,
             pages_with_text=run.pages_with_text if run else 0, truncated=run.truncated if run else False, metadata=fields,
             possible_duplicates=(duplicates or {}).get(d.id, []),
+            identity=IdentityOut(**assess(profile, run.patient_found if run else None).__dict__),
         )
 
 

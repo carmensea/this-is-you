@@ -112,7 +112,10 @@ function serveDist() {
           r.pipe(res);
           if (url.endsWith('/content') && r.statusCode === 200) r.on('end', () => pdfServed?.());
         });
+        // The page can close before or during the answer. Left unread, the answer stops the service from exiting.
+        res.on('close', () => up.destroy());
         up.on('error', (e) => {
+          if (res.destroyed) return;
           check('backend answers', false, `${url} ${e.code}`);
           res.writeHead(502);
           res.end();

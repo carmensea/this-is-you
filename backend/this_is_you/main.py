@@ -5,8 +5,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import sessionmaker
 
+from .api.backups import router as backups_router
 from .api.documents import router as documents_router
+from .api.imports import router as imports_router
 from .api.observations import router as observations_router
+from .backup import BackupJobs
 from .config import Settings, load_settings, validate
 from .db import make_engine, migrate
 from .extraction.queue import ExtractionQueue
@@ -34,9 +37,12 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.extraction = ExtractionQueue(lambda document_id: process_document(app.state.sessions, store, settings.extraction_limits, document_id))
     for document_id in documents_to_resume(app.state.sessions):
         app.state.extraction.enqueue(document_id)
+    app.state.backups = BackupJobs(settings)
     app.add_middleware(LocalOnlyMiddleware)
     app.include_router(documents_router)
     app.include_router(observations_router)
+    app.include_router(imports_router)
+    app.include_router(backups_router)
 
     @app.exception_handler(UploadRejected)
     async def rejected(_request: Request, exc: UploadRejected) -> JSONResponse:

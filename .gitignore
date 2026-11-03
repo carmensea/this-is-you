@@ -2,6 +2,7 @@
 node_modules
 dist
 tools/perf/results
+tools/readiness/results
 *.local
 
 # Python

@@ -2,16 +2,15 @@
 import { addMonths, fLong } from '../domain/dates';
 import { rangeOnly, fmtR } from '../domain/format';
 import { DCATL } from '../domain/vocabulary';
-import type { Archive, ArchiveDocument, HealthEvent, ImportFile, ImportJob, ISODate, LowConfidenceNote, MetadataFieldKey, SnapshotMode } from '../domain/types';
+import type { Archive, ArchiveDocument, BackupListing, HealthEvent, IdentityDetails, ImportFile, ImportJob, ISODate, LowConfidenceNote, MetadataFieldKey, SnapshotMode } from '../domain/types';
 import { ArchiveRequestError, type DocumentsBackend, type FieldDecision, type ObservationFieldValues } from '../services/archiveApi';
 import { FIELD_LABEL, FIELD_ORDER, displayValue, isReading } from '../domain/documentReview';
 import { listOnly, simulateProcessing } from '../services/importService';
 import { buildPersonalArchive, todayLocal } from '../services/localArchiveApi';
-import { fShort } from '../domain/dates';
-import { fmtSize, kindOf } from '../domain/format';
+import { BatchImporter, emptyReport, type ReportState } from './batchImport';
 
-const MAX_PARALLEL_UPLOADS = 2;
 const READING_POLL_MS = 800;
+const BACKUP_POLL_MS = 1000;
 
 export type View = 'overview' | 'biomarkers' | 'history' | 'documents' | 'compare' | 'import';
 export const VIEWS: View[] = ['overview', 'biomarkers', 'history', 'documents', 'compare', 'import'];
@@ -110,6 +109,15 @@ export interface AppState {
   rvDraft: ReviewDraft;
   rvStage: 'review' | 'confirm' | 'done';
   rvFilter: 'all' | 'attention' | 'done';
+  /** The saved import report, which outlasts the browser. */
+  report: ReportState;
+  /** The last refresh failed, so what is on screen may be out of date. It is not cleared or replaced. */
+  archiveStale: boolean;
+  identity: IdentityDetails | null;
+  identityOpen: boolean;
+  backups: BackupListing | null;
+  /** Why the backups or identity details could not be loaded or saved. */
+  safetyError: string | null;
   /** Why the last decision on a real document could not be saved. */
   rvError: string | null;
   /** The page of the original to show, when following a proposal back to its source. */
@@ -167,6 +175,12 @@ export const initialState: AppState = {
   dPage: 0,
   dHL: null,
   imp: [],
+  report: emptyReport,
+  archiveStale: false,
+  identity: null,
+  identityOpen: false,
+  backups: null,
+  safetyError: null,
   dz: false,
   rv: {},
   rvDoc: null,
@@ -202,6 +216,8 @@ export class AppStore {
   private stopSim: (() => void) | null = null;
   private readingTimer: ReturnType<typeof setTimeout> | null = null;
   private uploadsSinceRefresh = false;
+  private backupTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly imports: BatchImporter;
   private refreshSeq = 0;
   private seq = 0;
 
@@ -211,6 +227,7 @@ export class AppStore {
     private backend: DocumentsBackend | null = null,
   ) {
     this.state = { ...initialState, ...overrides };
+    this.imports = new BatchImporter(this, backend);
   }
 
   subscribe = (fn: () => void) => {
@@ -414,80 +431,12 @@ export class AppStore {
 
   /** Takes files from the picker or a drop. The demo archive only lists them. */
   receiveFiles = (files: File[]) => {
-    if (this.backend) this.uploadFiles(files, this.backend);
+    if (this.backend) void this.imports.receive(files);
     else this.addFiles(files.map((f) => listOnly(f)));
   };
 
-  private patchJob = (id: string, patch: Partial<ImportJob>) =>
-    this.setState((st) => ({ imp: st.imp.map((j) => (j.id === id ? { ...j, ...patch } : j)) }));
-
-  private uploadFiles(files: File[], backend: DocumentsBackend) {
-    const queue: { job: ImportJob; file: File }[] = [];
-    const jobs = files.map((file) => {
-      const name = file.webkitRelativePath || file.name;
-      const job: ImportJob = {
-        name,
-        size: fmtSize(file.size),
-        kind: kindOf(file.name),
-        outcome: 'uploading',
-        result: '',
-        id: 'u' + ++this.seq,
-        pct: 0,
-        done: false,
-      };
-      const refusal = !file.name.toLowerCase().endsWith('.pdf')
-        ? 'Only PDF files can be imported in this version. Nothing was stored.'
-        : file.size > backend.maxUploadBytes
-          ? `This file is larger than the ${Math.floor(backend.maxUploadBytes / 1048576)} MB limit. Nothing was stored.`
-          : null;
-      if (refusal) return { ...job, outcome: 'rejected' as const, result: refusal, pct: 100, done: true };
-      queue.push({ job, file });
-      return job;
-    });
-    this.setState((st) => ({ imp: jobs.concat(st.imp) }));
-    const work = async () => {
-      for (let next = queue.shift(); next; next = queue.shift()) {
-        const { job, file } = next;
-        const result = await backend.upload(file, (fraction) =>
-          this.patchJob(job.id, { pct: Math.min(99, Math.round(fraction * 100)) }),
-        );
-        if (result.kind === 'stored') {
-          this.patchJob(job.id, {
-            outcome: 'stored',
-            pct: 100,
-            done: true,
-            documentId: result.document.id,
-            result: 'Stored unchanged on this computer.',
-          });
-        } else if (result.kind === 'duplicate') {
-          const d = result.document;
-          this.patchJob(job.id, {
-            outcome: 'duplicate',
-            pct: 100,
-            done: true,
-            documentId: d.id,
-            result: `Identical to ${d.title}, imported ${fShort(d.date)}. Set aside; nothing was added.`,
-          });
-        } else {
-          this.patchJob(job.id, {
-            outcome: result.kind === 'rejected' ? 'rejected' : 'interrupted',
-            pct: 100,
-            done: true,
-            result: result.message,
-          });
-        }
-        if (result.kind === 'stored') {
-          await this.refreshDocuments(backend);
-          this.uploadsSinceRefresh = true;
-          this.watchReading();
-        }
-      }
-    };
-    return Promise.all(Array.from({ length: Math.min(MAX_PARALLEL_UPLOADS, queue.length) }, work));
-  }
-
   /** Reloads documents and results. Only the newest answer counts, so a slow reply cannot undo a newer one. */
-  private async refreshDocuments(backend: DocumentsBackend) {
+  async refreshDocuments(backend: DocumentsBackend) {
     const request = ++this.refreshSeq;
     try {
       const [documents, observations] = await Promise.all([backend.listDocuments(), backend.listObservations()]);
@@ -497,14 +446,78 @@ export class AppStore {
       this.archive = buildPersonalArchive(previous, documents, observations, today);
       // Someone looking at today keeps looking at today, even past midnight. Year filters left wide open stay wide open.
       this.setState((st) => ({
+        archiveStale: false,
         cur: st.cur === previous.today ? today : st.cur,
         hxFrom: st.hxFrom === previous.firstYear ? this.archive.firstYear : st.hxFrom,
         hxTo: st.hxTo === previous.lastYear ? this.archive.lastYear : st.hxTo,
       }));
     } catch {
-      // The change itself was saved. The screen catches up on the next refresh or page load.
+      // What was saved stays saved, and what is on screen stays on screen, marked as possibly out of date.
+      if (request === this.refreshSeq) this.setState({ archiveStale: true });
     }
   }
+
+  retryRefresh = () => (this.backend ? this.refreshDocuments(this.backend) : Promise.resolve());
+
+  /** An import keeps adding documents, so this also picks up files that are not on screen yet. */
+  noteUpload = () => {
+    this.uploadsSinceRefresh = true;
+    this.watchReading();
+  };
+
+  // Identity details and backups
+  loadArchiveSafety = async () => {
+    if (!this.backend) return;
+    try {
+      const [identity, backups] = await Promise.all([this.backend.getIdentity(), this.backend.listBackups()]);
+      this.setState({ identity, backups, safetyError: null });
+      if (backups.running) this.watchBackup();
+    } catch {
+      this.setState({ safetyError: 'Backups and identity details could not be loaded from the archive service.' });
+    }
+  };
+
+  /** Resolves to an error for the form to show, or null. Flags on documents change as soon as this is saved. */
+  saveIdentity = async (details: Omit<IdentityDetails, 'configured'>) => {
+    if (!this.backend) return null;
+    try {
+      const identity = await this.backend.saveIdentity(details);
+      this.setState({ identity, identityOpen: false });
+      await this.refreshDocuments(this.backend);
+      await this.imports.refresh();
+      return null;
+    } catch (problem) {
+      return problem instanceof ArchiveRequestError ? problem.message : 'This could not be saved.';
+    }
+  };
+
+  private watchBackup() {
+    const backend = this.backend;
+    if (!backend || this.backupTimer) return;
+    this.backupTimer = setTimeout(async () => {
+      this.backupTimer = null;
+      try {
+        const backups = await backend.listBackups();
+        this.setState({ backups, safetyError: null });
+        if (backups.running) this.watchBackup();
+      } catch {
+        this.setState({ safetyError: 'The archive service stopped answering while a backup was running. An unfinished backup is never used.' });
+      }
+    }, BACKUP_POLL_MS);
+  }
+
+  private backupAction = async (start: (backend: DocumentsBackend) => Promise<unknown>) => {
+    if (!this.backend) return;
+    try {
+      await start(this.backend);
+      this.setState({ backups: await this.backend.listBackups(), safetyError: null });
+      this.watchBackup();
+    } catch (problem) {
+      this.setState({ safetyError: problem instanceof ArchiveRequestError ? problem.message : 'This could not be started.' });
+    }
+  };
+  startBackup = () => this.backupAction((backend) => backend.startBackup());
+  checkBackup = (name: string) => this.backupAction((backend) => backend.checkBackup(name));
 
   // Decisions on real documents. The service keeps them; this only shows what it confirms it saved.
   private async saving(request: (backend: DocumentsBackend) => Promise<unknown>): Promise<boolean> {
@@ -590,7 +603,8 @@ export class AppStore {
     };
     if (this.archive.documents.some(isReading) || this.uploadsSinceRefresh) {
       this.uploadsSinceRefresh = false;
-      this.readingTimer = setTimeout(check, READING_POLL_MS);
+      // Each check loads the whole archive, so a large one is checked less often.
+      this.readingTimer = setTimeout(check, Math.max(READING_POLL_MS, this.archive.documents.length * 10));
     }
   };
 }

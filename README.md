@@ -40,6 +40,7 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 | `npm run build` | Typecheck, then production build to `dist/` |
 | `npm run perf -- --label X` | Browser timings and checks on synthetic archives, about 30 minutes, written to `tools/perf/results/` (needs Chrome and a prior build) |
 | `npm run perf:compare -- <old dist> <new dist>` | Alternates two builds to judge a change, about 15 minutes |
+| `npm run readiness -- [--scale 1]` | The whole import, crash, backup and restore workflow in Chrome, on a messy fictional folder. About 4 minutes at scale 1. Needs a prior build. |
 
 ## Where your documents live
 
@@ -58,7 +59,7 @@ incoming/           Uploads in progress. Cleared on every start.
 archive.sqlite3.before-upgrade-*   A copy of the database from before each schema upgrade
 ```
 
-**Back up this whole folder.** It is not encrypted by this app, so turn on disk encryption (FileVault, for example). To keep a backup consistent, stop the service first.
+The folder is not encrypted by this app, so turn on disk encryption (FileVault, for example). See [Backups](#backups).
 
 Settings are environment variables:
 
@@ -66,6 +67,7 @@ Settings are environment variables:
 | --- | --- | --- |
 | `THIS_IS_YOU_DATA_DIR` | see above | The service refuses a folder inside a Git repository |
 | `THIS_IS_YOU_MAX_UPLOAD_BYTES` | 209715200 (200 MB) | Per file |
+| `THIS_IS_YOU_BACKUP_DIR` | beside the archive, named `ThisIsYou Backups` | Refused inside the archive or a Git repository. Point it at another drive to survive losing this one. |
 | `THIS_IS_YOU_PORT` | 8000 | Set it for both `npm run backend` and `npm run dev` |
 | `THIS_IS_YOU_HOST` | 127.0.0.1 | Loopback only. Any other address stops the service from starting. |
 
@@ -76,6 +78,49 @@ Settings are environment variables:
 3. It moves to `originals/` as read-only, named by its hash. The name you gave it is only stored as text, and is never used to build a path.
 4. Its metadata is saved. If those exact bytes are already in the archive, no new document or file is created, and the arrival is recorded in the document's import history.
 5. The file is queued to be read, one document at a time in the background.
+
+## Importing a whole folder
+
+Choose or drop a folder on the Import screen. Nested folders are included, and files are streamed one at a time, so size is not limited by memory.
+
+- **Every file gets a line in the report,** including files that were refused. Nothing is skipped silently.
+- **The report is saved in the archive,** so closing the browser or a crash does not lose it. Sending stops if the browser closes, because only the browser can read your folder. Reading continues in the service.
+- **To continue,** choose the same folder again. Finished files are not sent again, and identical bytes are one document, however many times they arrive. A file's report line changes in the same database transaction as its document, so the two cannot disagree after a crash.
+- **Stored, read and verified are separate.** A scanned file is stored and not read. Nothing is verified by importing.
+- **Retry failures** reads failed files again. Files that never arrived need the folder chosen again after a page reload, since the browser no longer has access to them.
+- Your files are only read, never changed. **Hide this report** takes a report off the screen and keeps its rows.
+
+Limits: the screen lists up to 500 lines of a report at once, so use the filters past that. Folder paths are stored in the archive and its backups, and folder names can be sensitive. A file stored just as the service crashed, and never sent again, stays in `originals/` unlisted and is not backed up.
+
+## Identity check
+
+Enter your name, birth date and any previous names on the Import screen. Each reading records the names and birth dates printed under a patient label, and these are compared with your details when a document is shown. The details never reach the document reader, so changing them updates every flag with nothing read again.
+
+| Result | Meaning |
+| --- | --- |
+| Possible match | The printed details resemble yours. A suggestion, not verification. |
+| Possible mismatch | A printed name or birth date differs. It may belong to someone else, or be printed differently: nicknames and married names are flagged unless listed. |
+| Could not be determined | No readable text, no recognized label, or a birth date with none set in your details. |
+
+A flag never refuses, removes or verifies anything. Only English labels are recognized, and a name printed without a label is not noticed. These details are stored unencrypted in the archive and in backups, like everything else there.
+
+## Backups
+
+**Back up now** on the Import screen writes a backup and restores it into a temporary folder to test it. From the command line, with the service running or not:
+
+```sh
+npm run backend -- backup [--to FOLDER]     # Write one, then check it
+npm run backend -- verify BACKUP            # Check every byte and relationship. Changes nothing.
+npm run backend -- restore BACKUP --to NEW_FOLDER
+```
+
+- **What is in one:** a consistent snapshot of the database, which holds your metadata, decisions, results, correction history, import reports and identity details, plus every original, and a manifest of hashes, record counts and version numbers.
+- **It is safe while the app runs.** The snapshot uses SQLite's online backup, so it includes everything committed to the WAL and nothing half-written.
+- **An interrupted backup cannot be mistaken for one.** It is built as `*.incomplete` and renamed only when whole. Leftovers are refused, listed as unusable, and cleared by the next backup.
+- **Damage is caught:** a changed, missing or extra file, a damaged database, broken relationships, an edited manifest, or a backup from a newer version. Nothing is restored from a backup that fails.
+- **Your archive is protected.** Restoring into a folder that holds files needs its exact name typed, refuses while a service is using it, checks the new copy completely first, and moves the old folder to `*.replaced-*` instead of deleting it. To start using a restored folder, point `THIS_IS_YOU_DATA_DIR` at it.
+
+**Not covered.** Backups are not encrypted. They stay on this drive until you copy them elsewhere or set `THIS_IS_YOU_BACKUP_DIR`. Nothing removes old backups or `*.replaced-*` folders, and they hold everything your archive does. The manifest's checksum catches damage, not forgery: someone who can write to the folder can rewrite it.
 
 ## Reading, reviewing and verifying
 
@@ -149,6 +194,15 @@ Each document has three separate statuses:
 | `POST /api/observations/{id}/verify`, `/reject`, `/reopen` | Accept, reject or reopen one result |
 | `POST /api/observations/verify` | Accept several in one transaction |
 | `GET /api/lab-tests` | The known tests |
+| `POST /api/import-batches`, `GET /api/import-batches` | Start a batch, or list saved reports with their counts |
+| `POST /api/import-batches/{id}/items` | List up to 500 files. Listing one twice returns the same row. |
+| `GET /api/import-batches/{id}/items` | Report lines. Filter with `category` or `identity`, page with `offset` and `limit`. |
+| `POST /api/import-batches/{id}/items/{item}/file` | Send one file as the raw body. Repeating it for a stored file changes nothing. |
+| `POST /api/import-batches/{id}/retry-reading` | Read failed files again. Add `?item=` for one. |
+| `POST /api/import-batches/{id}/hide` | Take a report off the screen. Its rows stay. |
+| `GET /api/identity`, `PUT /api/identity` | Your details, used only to raise flags |
+| `GET /api/backups`, `POST /api/backups` | List backups, or start one |
+| `POST /api/backups/{name}/check` | Test-restore a backup into a temporary folder |
 | `GET /api/status` | Whether the service is up, and the size limit |
 
 ## Performance
@@ -182,7 +236,9 @@ A Mac that goes to sleep freezes the browser along with everything else, which l
 - **No health data in logs.** Access logs are off. The service logs only a document id, an outcome, a count and a size.
 - **Files are served safely.** Always as `application/pdf`, with `nosniff`, `no-store` and a restrictive content security policy.
 
-**Known limits.** There is no login, so other programs and other user accounts running on this computer can reach the service while it runs (though other accounts cannot read the files on disk). Files are not encrypted by the app or scanned for malware. A PDF is opened by your browser's own viewer, so it is only as safe as that viewer. The dev server is not a hardened production setup.
+**If a read fails,** the app tries again a few times, then shows what failed with a **Retry** button: no answer from the service, or an error from it. It never shows demo data or an empty archive in place of your records. If a refresh fails during use, your records stay on screen, marked as possibly out of date.
+
+**Known limits.** There is no login, so other programs and other user accounts running on this computer can reach the service while it runs (though other accounts cannot read the files on disk). That includes your identity details, and starting a backup. Files are not encrypted by the app or scanned for malware. A PDF is opened by your browser's own viewer, so it is only as safe as that viewer. The dev server is not a hardened production setup.
 
 ## Demo mode
 
@@ -205,6 +261,9 @@ backend/
     documents.py    Recording uploads and reading documents back
     metadata.py     Running the reader, proposals and decisions
     observations.py Laboratory results: creating, correcting, approving
+    imports.py      Batches of files and the report on them
+    identity.py     Comparing printed patient details with yours, as a suggestion
+    backup.py       Writing, checking and restoring backups
     lab_catalog.py  Known tests, unit spellings, safe conversions
     extraction/     worker.py: the limited process. rules.py and lab_rows.py: the text rules.
                     runner.py: starts it and checks its output. queue.py: one at a time.
@@ -212,6 +271,7 @@ backend/
     migrations/     Alembic migrations, applied on every start
     api/            HTTP routes
   tests/
+tools/          perf/: browser timings. readiness/: the whole workflow on a messy fictional folder.
 docs/data-model.md  How future record types will attach to documents
 src/
   domain/       Types, date and number formatting, shared vocabulary. No React.
@@ -221,6 +281,7 @@ src/
                 localArchiveApi.ts: the real service. demoArchiveApi.ts: the demo.
                 importService.ts: the demo's simulated import.
   state/        store.ts: all app state and actions, plain TypeScript.
+                batchImport.ts: sends a folder and follows the saved report.
   viewmodels/   One per screen. Turns state and data into what the screen displays.
   charts/       The SVG charts.
   components/   App shell and shared controls.

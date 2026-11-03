@@ -108,6 +108,31 @@ export function Notice({ v }: { v: VM }) {
     </div>
   );
 }
+/** A refresh failed. The records stay on screen and nothing stands in for them. */
+export function StaleNotice({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" style={{ borderBottom: `1px solid ${C.rule}` }}>
+      <div
+        style={{
+          maxWidth: 1480,
+          margin: '0 auto',
+          padding: '10px var(--gutter)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '4px 16px',
+          alignItems: 'baseline',
+          fontSize: 13,
+          color: C.rust,
+        }}
+      >
+        <span>The archive service did not answer, so this may be out of date. Your records have not changed.</span>
+        <button onClick={onRetry} style={{ fontSize: 13, color: C.ink, borderBottom: `1px solid ${C.ink}` }}>
+          Retry
+        </button>
+      </div>
+    </div>
+  );
+}
 export function SnapshotBar({ v }: { v: VM }) {
   return (
     <div style={{ borderBottom: `1px solid ${C.rule}` }}>

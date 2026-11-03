@@ -243,6 +243,68 @@ export interface DocumentReview {
   fields: Record<MetadataFieldKey, MetadataFieldState>;
   possibleDuplicates: string[];
   observations: LabObservation[];
+  identity?: IdentityCheck;
+}
+
+/** A suggestion for a person to check. Never a verification, and never a reason to refuse a document. */
+export interface IdentityCheck {
+  status: 'not_configured' | 'undetermined' | 'possible_match' | 'possible_mismatch';
+  reason: string;
+  names_found: string[];
+  birth_dates_found: string[];
+}
+
+export interface IdentityDetails {
+  full_name: string;
+  date_of_birth: string | null;
+  previous_names: string[];
+  configured: boolean;
+}
+
+export type ImportCategory =
+  | 'waiting' | 'reading' | 'read' | 'partial' | 'duplicate' | 'scanned' | 'encrypted' | 'no_text' | 'unsupported' | 'failed';
+
+export interface ImportBatchSummary {
+  id: string;
+  label: string;
+  created_at: string;
+  counts: Partial<Record<ImportCategory, number>>;
+  total: number;
+  identity_mismatches: number;
+  identity_undetermined: number;
+}
+
+export interface ImportReportItem {
+  id: number;
+  path: string;
+  byte_size: number;
+  state: 'pending' | 'stored' | 'duplicate' | 'unsupported' | 'rejected' | 'interrupted';
+  message: string | null;
+  attempts: number;
+  document_id: string | null;
+  document_filename: string | null;
+  extraction_status: ExtractionStatus | null;
+  review_status: DocumentReview['review'] | null;
+  verification_status: DocumentReview['verification'] | null;
+  pages_with_text: number;
+  page_count: number | null;
+  identity: IdentityCheck | null;
+}
+
+export interface BackupEntry {
+  name: string;
+  state: 'complete' | 'incomplete' | 'damaged';
+  created_at: string | null;
+  documents: number | null;
+  bytes: number | null;
+  last_check: { checked_at: string; ok: boolean; problems: string[] } | null;
+}
+
+export interface BackupListing {
+  location: string;
+  backups: BackupEntry[];
+  running: { kind: 'backup' | 'check'; name?: string; done: number; total: number } | null;
+  last_result: { kind: 'backup' | 'check'; name: string | null; ok: boolean; problems: string[] } | null;
 }
 
 export interface WeightReading {

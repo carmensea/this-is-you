@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect } from 'react';
 import { Footer } from '../components/controls';
 import { ObservationForm } from '../components/ObservationForm';
 import { useStore } from '../state/useStore';
@@ -6,6 +6,8 @@ import { C, MONO, SERIF } from '../theme';
 import { s } from '../components/styles';
 import { shellVM } from '../viewmodels/shell';
 import { importVM } from '../viewmodels/importQueue';
+import { BackupsSection, IdentitySection } from './ArchiveSafety';
+import { ImportReport } from './ImportReport';
 
 type VM = ReturnType<typeof shellVM> & ReturnType<typeof importVM>;
 
@@ -249,6 +251,11 @@ function ReviewQueue({ v }: { v: VM }) {
 export function ImportScreen() {
   const store = useStore();
   const v: VM = { ...shellVM(store), ...importVM(store) };
+  // Only this screen shows these. Loading them at startup re-rendered the first screen and delayed its charts.
+  useEffect(() => {
+    void store.imports.load();
+    void store.loadArchiveSafety();
+  }, [store]);
   return (
     <main style={{ maxWidth: 1480, margin: '0 auto', padding: '28px var(--gutter) 64px' }}>
       <div
@@ -383,8 +390,11 @@ export function ImportScreen() {
         </div>
       </div>
       {v.impHasBatch && <CurrentBatch v={v} />}
+      {!v.isDemo && <ImportReport pickFolder={v.pickFolder} />}
       <ReviewQueue v={v} />
       {!v.isDemo && <ManualResults v={v} />}
+      {!v.isDemo && <IdentitySection />}
+      {!v.isDemo && <BackupsSection />}
       <Footer />
     </main>
   );

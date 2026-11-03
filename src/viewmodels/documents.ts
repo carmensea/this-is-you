@@ -132,7 +132,14 @@ export function documentsVM(store: AppStore) {
               : k === 'reviewed' || k === 'parsed'
                 ? '1 record'
                 : 'None',
-        note: d.dup ? 'Duplicate, set aside' : d.review?.possibleDuplicates.length ? 'Possible duplicate' : '',
+        note: d.dup
+          ? 'Duplicate, set aside'
+          : [
+              d.review?.possibleDuplicates.length ? 'Possible duplicate' : '',
+              d.review?.identity?.status === 'possible_mismatch' ? 'Check whose document this is' : '',
+            ]
+              .filter(Boolean)
+              .join(' · '),
         bg: sel && sel.id === d.id ? '#E6E1D6' : 'transparent',
         current: !!(sel && sel.id === d.id),
         snapTag: inRec(d) ? '' : 'Added after snapshot',

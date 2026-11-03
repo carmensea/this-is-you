@@ -191,6 +191,7 @@ export function reviewVM(store: AppStore) {
     rvIsReal: !!real,
     rvContentUrl: d.contentUrl ? d.contentUrl + (s.rvSourcePage ? `#page=${s.rvSourcePage}` : '') : null,
     rvError: real ? s.rvError : null,
+    rvIdentity: real?.identity?.status === 'possible_mismatch' ? real.identity.reason : null,
     rvTitle: d.title,
     rvMeta: real
       ? `${d.file} · imported ${d.imported} · ${real.pageCount ? plural(real.pageCount, 'page') : 'pages not read'} · ${EXTRACTION_LABEL[real.extraction]}`

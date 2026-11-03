@@ -5,6 +5,7 @@ import logging
 import pytest
 from sqlalchemy import select, update
 
+from this_is_you.extraction import METHOD
 from this_is_you.models import Document, ExtractionStatus
 
 from . import pdfs
@@ -52,7 +53,7 @@ def test_inferred_values_are_never_reported_as_the_value(client):
         assert entry["value"] is None
         assert entry["decided_at"] is None
         assert entry["proposal"]["value"]
-        assert entry["proposal"]["method"] == "rules-v2"
+        assert entry["proposal"]["method"] == METHOD
 
 
 def test_even_a_high_confidence_proposal_stays_unverified(client):

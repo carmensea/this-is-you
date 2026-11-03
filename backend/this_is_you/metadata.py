@@ -52,7 +52,7 @@ def invalid(message: str) -> UploadRejected:
 def record_result(session: Session, document: Document, result: ExtractionResult) -> None:
     run = ExtractionRun(
         document_id=document.id, method=METHOD, status=ExtractionStatus(result.status), finished_at=utc_now(), page_count=result.page_count,
-        pages_read=result.pages_read, pages_with_text=result.pages_with_text, pages_failed=result.pages_failed, truncated=result.truncated, text_sha256=result.text_sha256,
+        pages_read=result.pages_read, pages_with_text=result.pages_with_text, pages_failed=result.pages_failed, truncated=result.truncated, text_sha256=result.text_sha256, patient_found=result.patient,
     )
     for p in result.proposals:
         run.proposals.append(MetadataProposal(field=MetadataField(p["field"]), value=p["value"], confidence=Confidence(p["confidence"]), reason=p["reason"], source_page=p["page"], source_snippet=p["snippet"]))

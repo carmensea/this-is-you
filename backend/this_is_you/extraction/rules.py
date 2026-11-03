@@ -243,3 +243,30 @@ def propose_all(pages: list[tuple[int, str]], embedded_title: str | None, today:
     lines = to_lines(pages)
     results = [propose_type(lines), propose_service_date(lines, today), propose_provider(lines), propose_title(lines, embedded_title, today)]
     return [r for r in results if r is not None]
+
+
+# ---- Whose document is this? Reports what is printed. Comparing it with anyone is done elsewhere.
+
+_NAME_LABEL = re.compile(r"^(?:re:\s*)?(?:patient(?:'s)?(?:\s+full)?\s+name|patient|pt\.?\s+name|name\s+of\s+patient|name)\s*[:#]\s*(.+)$", re.I)
+_NAME_STOP = re.compile(r"\s+(?:dob|d\.o\.b|date\s+of\s+birth|birth\s*date|mrn|age|sex|gender|id|account|acct|phone|ssn)\b.*$", re.I)
+_NAME_SHAPE = re.compile(r"[^\W\d_][^\W\d_ .,'-]*(?:[ ,.'-]+[^\W\d_][^\W\d_ .,'-]*){1,5}\.?")
+_BIRTH_LABEL = re.compile(r"\b(?:dob|d\.o\.b\.?|date\s+of\s+birth|birth\s*date)\s*[:#]?\s*(.{6,40})", re.I)
+MAX_FOUND = 5
+
+
+def find_patient(pages: list[tuple[int, str]], today: date) -> dict:
+    """Distinct names and birth dates printed under a patient label, each with its page."""
+    names: dict[str, int] = {}
+    births: dict[str, dict] = {}
+    for line in to_lines(pages):
+        if len(names) < MAX_FOUND and (m := _NAME_LABEL.match(line.text)):
+            value = _NAME_STOP.sub("", m[1]).strip(" ,;")
+            if _NAME_SHAPE.fullmatch(value):
+                names.setdefault(value, line.page)
+        if len(births) < MAX_FOUND and (m := _BIRTH_LABEL.search(line.text)):
+            found = find_dates(m[1], today)
+            if found:
+                first = found[0]
+                # A date like 03/04/1971 reads two ways, and either might be the printed meaning.
+                births.setdefault(first.iso, {"value": first.iso, "other": first.ambiguous, "page": line.page})
+    return {"names": [{"value": value, "page": page} for value, page in names.items()], "births": list(births.values())}

@@ -6,12 +6,15 @@
 | --- | --- |
 | `documents` | One row per unique original file: `sha256` (unique), `original_filename`, `media_type`, `byte_size`, `storage_key`, `imported_at`, and the three statuses `extraction_status`, `review_status`, `verification_status` |
 | `import_events` | One row per arrival of a file, including duplicates: `document_id`, `submitted_filename`, `outcome`, `occurred_at` |
-| `extraction_runs` | One row per attempt to read a file: `method`, `status`, page counts, `truncated`, `text_sha256` |
+| `extraction_runs` | One row per attempt to read a file: `method`, `status`, page counts, `truncated`, `text_sha256`, `patient_found` (names and birth dates printed under a patient label) |
 | `metadata_proposals` | What a run inferred: `field`, `value`, `confidence`, `reason`, `source_page`, `source_snippet` |
 | `metadata_decisions` | What a person decided, append-only: `field`, `action`, `value`, `proposal_id`, `decided_at`. The latest row per field is current. |
 
 | `lab_observations` | One laboratory result: name, value, unit and range as printed, optional `test_code`, normalized value when safely convertible, flag, the dates `collected_on`, `reported_on`, `documented_on` and `imported_at`, source page, line and text, `origin`, `extraction_status` and `verification_status` |
 | `lab_observation_revisions` | Append-only history of a result. The first row is what was first read or entered. |
+| `import_batches` | One folder or set of files a person chose: `label`, `created_at`, `hidden` |
+| `import_items` | One file of a batch, including refused ones: `path` (display text, never opened), `byte_size`, `state`, `message`, `document_id`, `attempts`. Changes in the same transaction as its document. |
+| `identity_profile` | One row at most: `full_name`, `date_of_birth`, `previous_names`. Only ever used to raise a flag. |
 
 A document's verified type, date, provider and title are read from `metadata_decisions`, and from nowhere else. Rereading a file adds a run and new proposals and leaves decisions alone. The full text of a document is not stored, only a hash of it and the short source lines behind each proposal.
 

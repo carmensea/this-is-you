@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readinessStub } from './fakeBackend';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { App } from '../App';
 import { fShort, toT } from '../domain/dates';
@@ -85,7 +86,7 @@ function fakeBackend(): DocumentsBackend {
   return {
     maxUploadBytes: 1000,
     listDocuments: vi.fn(async (): Promise<ArchiveDocument[]> => [toArchiveDocument(docDto())]),
-    upload: vi.fn(),
+    ...readinessStub(),
     decide: vi.fn(),
     setReview: vi.fn(),
     readAgain: vi.fn(),

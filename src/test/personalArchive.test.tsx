@@ -1,10 +1,11 @@
 import { StrictMode } from 'react';
+import { fakeImportServer, type Answer } from './fakeBackend';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { App } from '../App';
 import { viewFromHash } from '../services/archiveMode';
 import { ArchiveUnavailable } from '../screens/ArchiveUnavailable';
-import { ArchiveRequestError, type DocumentsBackend, type UploadResult } from '../services/archiveApi';
+import { ArchiveRequestError, type DocumentsBackend } from '../services/archiveApi';
 import { emptyPersonalArchive, toArchiveDocument, withDocuments, type DocumentDto } from '../services/localArchiveApi';
 import { AppStore, VIEWS, type AppState } from '../state/store';
 import { StoreContext } from '../state/useStore';
@@ -39,11 +40,11 @@ const dto = (over: Partial<DocumentDto> = {}): DocumentDto => ({
 
 const FICTIONAL = ['DEMONSTRATION DATA', 'Jordan Vale', 'SYNTHETIC SAMPLE RECORD', 'Northfield', 'Synthetic demonstration data', 'Load sample batch'];
 
-function backendWith(result: UploadResult, documents = [toArchiveDocument(dto())]): DocumentsBackend {
+function backendWith(answer: Answer = { state: 'stored' }, documents = [toArchiveDocument(dto())]): DocumentsBackend {
   return {
+    ...fakeImportServer(answer),
     maxUploadBytes: 1000,
     listDocuments: vi.fn(async () => documents),
-    upload: vi.fn(async () => result),
     decide: vi.fn(async () => toArchiveDocument(dto())),
     setReview: vi.fn(async () => toArchiveDocument(dto())),
     readAgain: vi.fn(async () => toArchiveDocument(dto())),
@@ -55,7 +56,7 @@ function backendWith(result: UploadResult, documents = [toArchiveDocument(dto())
   };
 }
 
-function mount(state: Partial<AppState> = {}, documents: DocumentDto[] = [dto()], backend = backendWith({ kind: 'failed', message: 'x' })) {
+function mount(state: Partial<AppState> = {}, documents: DocumentDto[] = [dto()], backend = backendWith()) {
   window.location.hash = '';
   const archive = withDocuments(emptyPersonalArchive('2026-11-01'), documents.map(toArchiveDocument));
   const store = new AppStore(archive, { view: 'documents', cur: archive.today, ...state }, backend);
@@ -153,7 +154,7 @@ describe('address bar', () => {
   it('opens the screen named in the address, so a reload stays put', () => {
     window.location.hash = '/import';
     const archive = emptyPersonalArchive('2026-11-01');
-    const store = new AppStore(archive, { view: 'documents', cur: archive.today }, backendWith({ kind: 'failed', message: 'x' }));
+    const store = new AppStore(archive, { view: 'documents', cur: archive.today }, backendWith());
     // StrictMode matches main.tsx, and re-runs effects the way that exposed this bug.
     render(<StrictMode><StoreContext.Provider value={store}><App /></StoreContext.Provider></StrictMode>);
     fireEvent(window, new HashChangeEvent('hashchange'));
@@ -216,7 +217,7 @@ describe('inferred details never pass as verified', () => {
 
 describe('the review workflow', () => {
   const open = () => {
-    const backend = backendWith({ kind: 'failed', message: 'x' });
+    const backend = backendWith();
     const view = mount({ view: 'import', rvDoc: dto().id, rvStage: 'review' }, [dto()], backend);
     return { ...view, backend };
   };
@@ -284,7 +285,7 @@ describe('the review workflow', () => {
     expect((screen.getByText('Continue to confirmation') as HTMLButtonElement).disabled).toBe(true);
   });
   it('completes the review through the service', async () => {
-    const backend = backendWith({ kind: 'failed', message: 'x' });
+    const backend = backendWith();
     const all = field('confirmed', 'lab');
     const view = mount({ view: 'import', rvDoc: dto().id, rvStage: 'review' }, [dto({ metadata: { document_type: all, service_date: field('confirmed', '2024-03-11'), provider: field('not_stated'), report_title: field('corrected', 'A Title') } })], backend);
     fireEvent.click(screen.getByText('Continue to confirmation'));
@@ -302,54 +303,50 @@ describe('the review workflow', () => {
 });
 
 describe('uploading', () => {
-  const stored = toArchiveDocument(dto());
-  async function send(result: UploadResult, files: File[], documents = [stored]) {
-    const backend = backendWith(result, documents);
+  async function send(answer: Answer, files: File[], documents = [toArchiveDocument(dto())]) {
+    const backend = backendWith(answer, documents);
     const view = mount({ view: 'import' }, [], backend);
-    await act(async () => { view.store.receiveFiles(files); });
+    await act(async () => { await view.store.imports.receive(files); });
     return view;
   }
   it('stores a file and shows it in Documents', async () => {
-    const { store, container, backend } = await send({ kind: 'stored', document: stored }, [pdf()]);
-    expect(backend.upload).toHaveBeenCalledOnce();
+    const { store, container, backend } = await send({ state: 'stored', extraction: 'extracted' }, [pdf()]);
+    expect(backend.uploadBatchItem).toHaveBeenCalledOnce();
     expect(container.textContent).toContain('Stored, ready for review');
-    expect(container.textContent).toContain('none verified yet');
-    expect(container.textContent).toContain('1 stored, 0 duplicate');
-    expect(store.archive.documents.map(d => d.id)).toEqual([stored.id]);
+    expect(container.textContent).toContain('None verified yet');
+    expect(container.textContent).toContain('1 file listed, 1 received');
+    expect(store.archive.documents.map(d => d.id)).toEqual([dto().id]);
     fireEvent.click(screen.getByText('View in Documents'));
     expect(store.state.view).toBe('documents');
-    expect(store.state.dSel).toBe(stored.id);
+    expect(store.state.dSel).toBe('d0');
   });
   it('explains a duplicate and names the original', async () => {
-    const { container } = await send({ kind: 'duplicate', document: stored }, [pdf()]);
+    const { container } = await send({ state: 'duplicate' }, [pdf()]);
     expect(container.textContent).toContain('Duplicate, set aside');
     expect(container.textContent).toContain('Identical to blood work 2024.pdf');
     expect(container.textContent).toContain('nothing was added');
   });
   it('shows the reason a file was refused', async () => {
-    const { container } = await send({ kind: 'rejected', message: 'This file is not a readable PDF. Nothing was stored.' }, [pdf()]);
+    const { container } = await send({ state: 'rejected', message: 'This file is not a readable PDF. Nothing was stored.' }, [pdf()]);
     expect(container.textContent).toContain('Not accepted, nothing stored');
     expect(container.textContent).toContain('not a readable PDF');
   });
-  it('reports a failed connection', async () => {
-    const { container } = await send({ kind: 'failed', message: 'The upload did not finish. Nothing was stored. Try again.' }, [pdf()]);
-    expect(container.textContent).toContain('Upload failed, nothing stored');
-  });
-  it('turns away other formats and oversized files without sending them', async () => {
-    const { backend, container } = await send({ kind: 'stored', document: stored }, [pdf('photo.heic'), pdf('huge.pdf', 2000)]);
-    expect(backend.upload).not.toHaveBeenCalled();
+  it('lists other formats and oversized files without sending them', async () => {
+    const { backend, container } = await send({ state: 'stored' }, [pdf('photo.heic'), pdf('huge.pdf', 2000)]);
+    expect(backend.uploadBatchItem).not.toHaveBeenCalled();
     expect(container.textContent).toContain('Only PDF files can be imported');
     expect(container.textContent).toContain('larger than the 0 MB limit');
   });
   it('uploads a whole batch', async () => {
-    const { backend } = await send({ kind: 'stored', document: stored }, [pdf('1.pdf'), pdf('2.pdf'), pdf('3.pdf'), pdf('4.pdf'), pdf('5.pdf')]);
-    expect(backend.upload).toHaveBeenCalledTimes(5);
+    const { backend } = await send({ state: 'stored' }, [pdf('1.pdf'), pdf('2.pdf'), pdf('3.pdf'), pdf('4.pdf'), pdf('5.pdf')]);
+    expect(backend.uploadBatchItem).toHaveBeenCalledTimes(5);
   });
-  it('still shows the upload result if the list cannot refresh', async () => {
-    const backend = backendWith({ kind: 'stored', document: stored });
+  it('still shows the upload result if the list cannot refresh, and says the screen may be behind', async () => {
+    const backend = backendWith({ state: 'stored', extraction: 'extracted' });
     backend.listDocuments = vi.fn(async () => { throw new Error('down'); });
     const view = mount({ view: 'import' }, [], backend);
-    await act(async () => { view.store.receiveFiles([pdf()]); });
-    expect(view.container.textContent).toContain('Stored, not read');
+    await act(async () => { await view.store.imports.receive([pdf()]); });
+    expect(view.container.textContent).toContain('Stored, ready for review');
+    expect(view.container.textContent).toContain('may be out of date');
   });
 });

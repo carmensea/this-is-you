@@ -37,6 +37,7 @@ class ExtractionResult:
     text_sha256: str | None = None
     proposals: list[dict] = field(default_factory=list)
     lab_rows: list[dict] = field(default_factory=list)
+    patient: dict | None = None
 
 
 def _clean_proposal(raw: dict) -> dict | None:
@@ -65,6 +66,15 @@ def _clean_lab_row(raw: dict) -> dict | None:
     }
 
 
+def _clean_patient(raw: object) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    pages = lambda e: e["page"] if isinstance(e.get("page"), int) else None  # noqa: E731
+    names = [{"value": n["value"][:120], "page": pages(n)} for n in raw.get("names") or [] if isinstance(n, dict) and _text(n.get("value"), 120)]
+    births = [{"value": b["value"][:10], "other": _text(b.get("other"), 10), "page": pages(b)} for b in raw.get("births") or [] if isinstance(b, dict) and _text(b.get("value"), 10)]
+    return {"names": names[:5], "births": births[:5]}
+
+
 def parse_output(stdout: bytes) -> ExtractionResult:
     try:
         data = json.loads(stdout[:_MAX_OUTPUT])
@@ -84,6 +94,7 @@ def parse_output(stdout: bytes) -> ExtractionResult:
         text_sha256=sha if isinstance(sha, str) and len(sha) == 64 else None,
         proposals=[p for p in map(_clean_proposal, data.get("proposals") or []) if p],
         lab_rows=[r for r in map(_clean_lab_row, data.get("lab_rows") or []) if r],
+        patient=_clean_patient(data.get("patient")),
     )
 
 

@@ -508,6 +508,11 @@ function ExtractedValues({ v }: { v: VM }) {
         }}
       >
         <span style={{ fontSize: 13, color: v.rvPendingColor, maxWidth: 420 }}>{v.rvPendingText}</span>
+        {v.rvIdentity && (
+          <p role="note" style={{ margin: '12px 0 0', fontSize: 13, lineHeight: 1.5, color: C.rust, maxWidth: 720 }}>
+            {v.rvIdentity}
+          </p>
+        )}
         {v.rvError && (
           <span role="alert" style={{ fontSize: 13, color: C.rust }}>
             {v.rvError}
