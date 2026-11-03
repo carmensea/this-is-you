@@ -69,11 +69,15 @@ const EXTRACTION_NOTE: Partial<Record<ExtractionStatus, string>> = {
     'Reading stopped at the safety limits on time or memory. The original is stored unchanged. Enter the details by hand.',
 };
 
+// Building a formatter is slow enough to show on a page load, so every document shares one.
+let sharedTimeFormat: Intl.DateTimeFormat | undefined;
+const timeFormat = () => (sharedTimeFormat ??= new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' }));
+
 /** Shapes a stored file for the screens. Only decisions a person made count as facts about it. */
 export function toArchiveDocument(dto: DocumentDto): ArchiveDocument {
   const imported = new Date(dto.imported_at);
   const importDate = localDate(imported);
-  const time = imported.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = timeFormat().format(imported);
   const fields = Object.fromEntries(
     Object.entries(dto.metadata).map(([key, f]) => [
       key,
@@ -300,8 +304,15 @@ export function buildPersonalArchive(
   observations: LabObservation[],
   today: string,
 ): Archive {
+  const byDocument = new Map<string, LabObservation[]>();
+  for (const o of observations) {
+    if (!o.document_id) continue;
+    const rows = byDocument.get(o.document_id);
+    if (rows) rows.push(o);
+    else byDocument.set(o.document_id, [o]);
+  }
   const withResults = documents.map((d) =>
-    d.review ? { ...d, review: { ...d.review, observations: observations.filter((o) => o.document_id === d.id) } } : d,
+    d.review ? { ...d, review: { ...d.review, observations: byDocument.get(d.id) ?? [] } } : d,
   );
   return {
     ...withDocuments(base, withResults),

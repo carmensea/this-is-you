@@ -38,6 +38,8 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 | `npm run test:all` | Both |
 | `npm run typecheck` | Strict TypeScript check |
 | `npm run build` | Typecheck, then production build to `dist/` |
+| `npm run perf -- --label X` | Browser timings and checks on synthetic archives, about 30 minutes, written to `tools/perf/results/` (needs Chrome and a prior build) |
+| `npm run perf:compare -- <old dist> <new dist>` | Alternates two builds to judge a change, about 15 minutes |
 
 ## Where your documents live
 
@@ -148,6 +150,29 @@ Each document has three separate statuses:
 | `POST /api/observations/verify` | Accept several in one transaction |
 | `GET /api/lab-tests` | The known tests |
 | `GET /api/status` | Whether the service is up, and the size limit |
+
+## Performance
+
+Timings use fictional archives only, and any request to another host is blocked. `tools/perf/baselines/` holds full runs from before and after the first performance work. These were taken on one Mac, so use them as reference points. To judge a change, keep a copy of the old `dist/` and run `npm run perf:compare`: separate runs differ by 10 to 15 percent.
+
+Medians from alternating loads with nothing cached, in ms, before and after that work:
+
+| Archive and screen | First text | Charts painted | Longest freeze |
+|---|---|---|---|
+| Small (8 documents), Overview | 4096 → 2636 | 4443 → 4665 | 2192 → 1030 |
+| Small, Compare | 4576 → 2952 | 5058 → 5218 | 2964 → 1089 |
+| Demo, Overview | 5700 → 4036 | 5930 → 6013 | 3402 → 1644 |
+| Large (5,400 results), Overview | 7240 → 5820 | 7516 → 7110 | 4059 → 1436 |
+
+On a page's first paint, charts draw just after the text. This is deliberate: the interface responds sooner, and charts can finish slightly later.
+
+**Known limitations.** These are recorded and not being optimized until there is evidence that they matter in normal use.
+
+- **Cold start.** The first load with nothing cached takes about 2.6 seconds to first text on a small archive and about 4 seconds in demo mode. Reloads are much faster, as Chrome reuses compiled code.
+- **PDF preview.** The first click on a document can freeze the page for 1.5 to 2.8 seconds. The file itself is served in about 10 ms. The cause is probably the first render of the detail view, but this has not been confirmed.
+- **Large archives.** 5,400 results means an 11.4 MB observations response (about 490 ms), and each correction takes about 250 ms.
+
+A Mac that goes to sleep freezes the browser along with everything else, which looks like a hung page. The perf tools keep the Mac awake and report any sleep during a run.
 
 ## Security and privacy
 

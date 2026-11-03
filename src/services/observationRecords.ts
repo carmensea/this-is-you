@@ -182,11 +182,11 @@ export function buildClinicalRecords(
   const preferred = FIRST_CHOICE_MARKERS.flatMap((k) => markerList.filter((m) => m.key === k));
   const rest = markerList.filter((m) => !preferred.includes(m)).sort((a, b) => b.results.length - a.results.length);
 
+  const drawCategories = draws.map(() => new Set<string>());
+  for (const m of markerList) for (const r of m.results) drawCategories[r.i].add(m.cat);
   const events: HealthEvent[] = draws.map(([date, lab], i) => {
     const documentId = drawDocuments[i];
-    const shorts = usedCategories
-      .filter((c) => markerList.some((m) => m.cat === c.key && m.results.some((r) => r.i === i)))
-      .map((c) => c.short);
+    const shorts = usedCategories.filter((c) => drawCategories[i].has(c.key)).map((c) => c.short);
     return {
       id: 'e' + i,
       type: 'lab' as const,

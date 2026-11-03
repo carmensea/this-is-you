@@ -1,0 +1,411 @@
+{
+ "label": "before",
+ "started": "2026-11-02T20:43:37.168Z",
+ "runs": 3,
+ "measures": {
+  "demo overview": {
+   "coldMain": 4839,
+   "coldFcp": 5772,
+   "coldLongest": 3382,
+   "coldBlocked": 5203,
+   "reloadMain": 1715,
+   "reloadFcp": 1944,
+   "reloadLongest": 820
+  },
+  "demo biomarkers": {
+   "coldMain": 3862,
+   "coldFcp": 4412,
+   "coldLongest": 2388,
+   "coldBlocked": 3818,
+   "reloadMain": 1557,
+   "reloadFcp": 1580,
+   "reloadLongest": 766
+  },
+  "demo history": {
+   "coldMain": 4701,
+   "coldFcp": 5600,
+   "coldLongest": 3267,
+   "coldBlocked": 4983,
+   "reloadMain": 2111,
+   "reloadFcp": 2136,
+   "reloadLongest": 1237
+  },
+  "demo compare": {
+   "coldMain": 5114,
+   "coldFcp": 6348,
+   "coldLongest": 3597,
+   "coldBlocked": 5744,
+   "reloadMain": 2709,
+   "reloadFcp": 2740,
+   "reloadLongest": 1639
+  },
+  "demo documents": {
+   "coldMain": 2497,
+   "coldFcp": 4076,
+   "coldLongest": 1250,
+   "coldBlocked": 2067,
+   "reloadMain": 1402,
+   "reloadFcp": 1468,
+   "reloadLongest": 520
+  },
+  "demo import": {
+   "coldMain": 2111,
+   "coldFcp": 2900,
+   "coldLongest": 905,
+   "coldBlocked": 1708,
+   "reloadMain": 1034,
+   "reloadFcp": 1060,
+   "reloadLongest": 622
+  },
+  "demo overview snapshot": {
+   "stepMedian": 540,
+   "stepWorst": 1242,
+   "longest": 1222
+  },
+  "demo biomarkers snapshot": {
+   "stepMedian": 200,
+   "stepWorst": 958,
+   "longest": 942
+  },
+  "demo history snapshot": {
+   "stepMedian": 253,
+   "stepWorst": 1861,
+   "longest": 1857
+  },
+  "demo compare snapshot": {
+   "stepMedian": 596,
+   "stepWorst": 2290,
+   "longest": 2267
+  },
+  "demo timeline captures": {
+   "captures": 24,
+   "blank": 0,
+   "chartsRemoved": 11
+  },
+  "demo back and forward": {
+   "clickMedian": 1405,
+   "clickWorst": 2235,
+   "historyMedian": 1197,
+   "historyWorst": 2700
+  },
+  "empty API": {
+   "status": {
+    "ms": 18,
+    "kb": 0
+   },
+   "documents": {
+    "ms": 28,
+    "kb": 0
+   },
+   "observations": {
+    "ms": 7,
+    "kb": 0
+   },
+   "lab-tests": {
+    "ms": 4,
+    "kb": 3
+   }
+  },
+  "empty overview": {
+   "coldMain": 893,
+   "coldFcp": 1112,
+   "coldLongest": 222,
+   "coldBlocked": 390,
+   "reloadMain": 274,
+   "reloadFcp": 416,
+   "reloadLongest": 134
+  },
+  "empty biomarkers": {
+   "coldMain": 933,
+   "coldFcp": 1156,
+   "coldLongest": 245,
+   "coldBlocked": 419,
+   "reloadMain": 274,
+   "reloadFcp": 284,
+   "reloadLongest": 127
+  },
+  "empty history": {
+   "coldMain": 916,
+   "coldFcp": 1132,
+   "coldLongest": 227,
+   "coldBlocked": 405,
+   "reloadMain": 255,
+   "reloadFcp": 328,
+   "reloadLongest": 120
+  },
+  "empty compare": {
+   "coldMain": 924,
+   "coldFcp": 1140,
+   "coldLongest": 240,
+   "coldBlocked": 411,
+   "reloadMain": 266,
+   "reloadFcp": 300,
+   "reloadLongest": 127
+  },
+  "empty documents": {
+   "coldMain": 1067,
+   "coldFcp": 1552,
+   "coldLongest": 376,
+   "coldBlocked": 551,
+   "reloadMain": 327,
+   "reloadFcp": 348,
+   "reloadLongest": 142
+  },
+  "empty import": {
+   "coldMain": 986,
+   "coldFcp": 1356,
+   "coldLongest": 297,
+   "coldBlocked": 477,
+   "reloadMain": 265,
+   "reloadFcp": 304,
+   "reloadLongest": 128
+  },
+  "empty back and forward": {
+   "clickMedian": 518,
+   "clickWorst": 1194,
+   "historyMedian": 159,
+   "historyWorst": 340
+  },
+  "demo and empty switching": {
+   "demoMain": 1529,
+   "realMain": 215
+  },
+  "small API": {
+   "status": {
+    "ms": 2,
+    "kb": 0
+   },
+   "documents": {
+    "ms": 9,
+    "kb": 12
+   },
+   "observations": {
+    "ms": 7,
+    "kb": 64
+   },
+   "lab-tests": {
+    "ms": 2,
+    "kb": 3
+   }
+  },
+  "small overview": {
+   "coldMain": 2926,
+   "coldFcp": 3972,
+   "coldLongest": 2062,
+   "coldBlocked": 3473,
+   "reloadMain": 948,
+   "reloadFcp": 964,
+   "reloadLongest": 374
+  },
+  "small biomarkers": {
+   "coldMain": 2223,
+   "coldFcp": 2628,
+   "coldLongest": 1361,
+   "coldBlocked": 2023,
+   "reloadMain": 722,
+   "reloadFcp": 736,
+   "reloadLongest": 264
+  },
+  "small history": {
+   "coldMain": 2364,
+   "coldFcp": 2876,
+   "coldLongest": 1486,
+   "coldBlocked": 2221,
+   "reloadMain": 815,
+   "reloadFcp": 828,
+   "reloadLongest": 310
+  },
+  "small compare": {
+   "coldMain": 3393,
+   "coldFcp": 4120,
+   "coldLongest": 2506,
+   "coldBlocked": 3622,
+   "reloadMain": 990,
+   "reloadFcp": 1000,
+   "reloadLongest": 452
+  },
+  "small documents": {
+   "coldMain": 1339,
+   "coldFcp": 2452,
+   "coldLongest": 469,
+   "coldBlocked": 1146,
+   "reloadMain": 1282,
+   "reloadFcp": 1324,
+   "reloadLongest": 418
+  },
+  "small import": {
+   "coldMain": 1593,
+   "coldFcp": 2048,
+   "coldLongest": 451,
+   "coldBlocked": 923,
+   "reloadMain": 690,
+   "reloadFcp": 704,
+   "reloadLongest": 211
+  },
+  "small overview snapshot": {
+   "stepMedian": 380,
+   "stepWorst": 836,
+   "longest": 788
+  },
+  "small biomarkers snapshot": {
+   "stepMedian": 222,
+   "stepWorst": 940,
+   "longest": 927
+  },
+  "small history snapshot": {
+   "stepMedian": 250,
+   "stepWorst": 1016,
+   "longest": 736
+  },
+  "small compare snapshot": {
+   "stepMedian": 423,
+   "stepWorst": 1085,
+   "longest": 1070
+  },
+  "small timeline captures": {
+   "captures": 24,
+   "blank": 0,
+   "chartsRemoved": 0
+  },
+  "small back and forward": {
+   "clickMedian": 883,
+   "clickWorst": 1572,
+   "historyMedian": 559,
+   "historyWorst": 607
+  },
+  "small PDF preview": {
+   "loadedMedian": 1350,
+   "loadedWorst": 4539,
+   "nextFrameWorst": 11,
+   "longest": 2281
+  },
+  "demo and small switching": {
+   "demoMain": 1523,
+   "realMain": 738
+  },
+  "large API": {
+   "status": {
+    "ms": 3,
+    "kb": 0
+   },
+   "documents": {
+    "ms": 20,
+    "kb": 150
+   },
+   "observations": {
+    "ms": 507,
+    "kb": 11447
+   },
+   "lab-tests": {
+    "ms": 6,
+    "kb": 3
+   }
+  },
+  "large overview": {
+   "coldMain": 6394,
+   "coldFcp": 7120,
+   "coldLongest": 3994,
+   "coldBlocked": 6150,
+   "reloadMain": 2379,
+   "reloadFcp": 2396,
+   "reloadLongest": 917
+  },
+  "large biomarkers": {
+   "coldMain": 6505,
+   "coldFcp": 7272,
+   "coldLongest": 4124,
+   "coldBlocked": 6169,
+   "reloadMain": 2825,
+   "reloadFcp": 2884,
+   "reloadLongest": 1367
+  },
+  "large history": {
+   "coldMain": 6399,
+   "coldFcp": 7068,
+   "coldLongest": 3995,
+   "coldBlocked": 5922,
+   "reloadMain": 2538,
+   "reloadFcp": 2572,
+   "reloadLongest": 882
+  },
+  "large compare": {
+   "coldMain": 6498,
+   "coldFcp": 6864,
+   "coldLongest": 4067,
+   "coldBlocked": 5846,
+   "reloadMain": 3343,
+   "reloadFcp": 3368,
+   "reloadLongest": 1821
+  },
+  "large documents": {
+   "coldMain": 5634,
+   "coldFcp": 7088,
+   "coldLongest": 2387,
+   "coldBlocked": 4267,
+   "reloadMain": 2289,
+   "reloadFcp": 2340,
+   "reloadLongest": 607
+  },
+  "large import": {
+   "coldMain": 5166,
+   "coldFcp": 8580,
+   "coldLongest": 2594,
+   "coldBlocked": 4194,
+   "reloadMain": 2456,
+   "reloadFcp": 2796,
+   "reloadLongest": 907
+  },
+  "large overview snapshot": {
+   "stepMedian": 519,
+   "stepWorst": 1619,
+   "longest": 1618
+  },
+  "large biomarkers snapshot": {
+   "stepMedian": 664,
+   "stepWorst": 1225,
+   "longest": 1201
+  },
+  "large history snapshot": {
+   "stepMedian": 591,
+   "stepWorst": 1065,
+   "longest": 1049
+  },
+  "large compare snapshot": {
+   "stepMedian": 777,
+   "stepWorst": 2231,
+   "longest": 2083
+  },
+  "large timeline captures": {
+   "captures": 24,
+   "blank": 0,
+   "chartsRemoved": 0
+  },
+  "large back and forward": {
+   "clickMedian": 2724,
+   "clickWorst": 3041,
+   "historyMedian": 969,
+   "historyWorst": 1548
+  },
+  "large PDF preview": {
+   "loadedMedian": 1495,
+   "loadedWorst": 3880,
+   "nextFrameWorst": 12,
+   "longest": 1528
+  },
+  "demo and large switching": {
+   "demoMain": 2235,
+   "realMain": 1587
+  }
+ },
+ "failures": [
+  "demo timeline captures: capturing never removes a chart 11 removed"
+ ],
+ "pauses": [
+  {
+   "at": "2026-11-02T21:00:35.576Z",
+   "seconds": 19
+  }
+ ],
+ "seconds": 1705,
+ "sleeps": 0
+}

@@ -1,0 +1,452 @@
+{
+ "label": "after",
+ "started": "2026-11-02T22:39:03.195Z",
+ "runs": 3,
+ "measures": {
+  "demo overview": {
+   "coldMain": 4588,
+   "coldFcp": 6552,
+   "coldChart": 8799,
+   "coldLongest": 2031,
+   "coldBlocked": 6983,
+   "reloadMain": 1354,
+   "reloadFcp": 1708,
+   "reloadChart": 2398,
+   "reloadLongest": 748
+  },
+  "demo biomarkers": {
+   "coldMain": 3583,
+   "coldFcp": 4772,
+   "coldChart": 6276,
+   "coldLongest": 1798,
+   "coldBlocked": 4595,
+   "reloadMain": 1354,
+   "reloadFcp": 1372,
+   "reloadChart": 1808,
+   "reloadLongest": 541
+  },
+  "demo history": {
+   "coldMain": 3567,
+   "coldFcp": 5796,
+   "coldChart": 7274,
+   "coldLongest": 1768,
+   "coldBlocked": 5724,
+   "reloadMain": 2359,
+   "reloadFcp": 2420,
+   "reloadChart": 2758,
+   "reloadLongest": 1065
+  },
+  "demo compare": {
+   "coldMain": 4076,
+   "coldFcp": 7636,
+   "coldChart": 8569,
+   "coldLongest": 2592,
+   "coldBlocked": 7372,
+   "reloadMain": 2170,
+   "reloadFcp": 2232,
+   "reloadChart": 2854,
+   "reloadLongest": 1110
+  },
+  "demo documents": {
+   "coldMain": 3882,
+   "coldFcp": 6188,
+   "coldChart": 0,
+   "coldLongest": 1912,
+   "coldBlocked": 3235,
+   "reloadMain": 1505,
+   "reloadFcp": 1560,
+   "reloadChart": 0,
+   "reloadLongest": 548
+  },
+  "demo import": {
+   "coldMain": 2823,
+   "coldFcp": 4028,
+   "coldChart": 0,
+   "coldLongest": 1114,
+   "coldBlocked": 2281,
+   "reloadMain": 1746,
+   "reloadFcp": 1760,
+   "reloadChart": 0,
+   "reloadLongest": 853
+  },
+  "demo overview snapshot": {
+   "stepMedian": 505,
+   "stepWorst": 1140,
+   "longest": 1128
+  },
+  "demo biomarkers snapshot": {
+   "stepMedian": 272,
+   "stepWorst": 1188,
+   "longest": 1072
+  },
+  "demo history snapshot": {
+   "stepMedian": 276,
+   "stepWorst": 1852,
+   "longest": 1845
+  },
+  "demo compare snapshot": {
+   "stepMedian": 637,
+   "stepWorst": 2039,
+   "longest": 1980
+  },
+  "demo timeline captures": {
+   "captures": 24,
+   "blank": 0,
+   "chartsRemoved": 0
+  },
+  "demo back and forward": {
+   "clickMedian": 1445,
+   "clickWorst": 1864,
+   "historyMedian": 1161,
+   "historyWorst": 2867
+  },
+  "empty API": {
+   "status": {
+    "ms": 35,
+    "kb": 0
+   },
+   "documents": {
+    "ms": 91,
+    "kb": 0
+   },
+   "observations": {
+    "ms": 92,
+    "kb": 0
+   },
+   "lab-tests": {
+    "ms": 29,
+    "kb": 3
+   }
+  },
+  "empty overview": {
+   "coldMain": 1424,
+   "coldFcp": 1716,
+   "coldChart": 0,
+   "coldLongest": 357,
+   "coldBlocked": 684,
+   "reloadMain": 372,
+   "reloadFcp": 384,
+   "reloadChart": 0,
+   "reloadLongest": 155
+  },
+  "empty biomarkers": {
+   "coldMain": 1388,
+   "coldFcp": 1692,
+   "coldChart": 0,
+   "coldLongest": 366,
+   "coldBlocked": 696,
+   "reloadMain": 391,
+   "reloadFcp": 408,
+   "reloadChart": 0,
+   "reloadLongest": 169
+  },
+  "empty history": {
+   "coldMain": 1446,
+   "coldFcp": 1748,
+   "coldChart": 0,
+   "coldLongest": 336,
+   "coldBlocked": 678,
+   "reloadMain": 386,
+   "reloadFcp": 400,
+   "reloadChart": 0,
+   "reloadLongest": 165
+  },
+  "empty compare": {
+   "coldMain": 1398,
+   "coldFcp": 1704,
+   "coldChart": 0,
+   "coldLongest": 370,
+   "coldBlocked": 693,
+   "reloadMain": 390,
+   "reloadFcp": 400,
+   "reloadChart": 0,
+   "reloadLongest": 159
+  },
+  "empty documents": {
+   "coldMain": 1415,
+   "coldFcp": 2108,
+   "coldChart": 0,
+   "coldLongest": 488,
+   "coldBlocked": 774,
+   "reloadMain": 402,
+   "reloadFcp": 420,
+   "reloadChart": 0,
+   "reloadLongest": 189
+  },
+  "empty import": {
+   "coldMain": 1842,
+   "coldFcp": 2508,
+   "coldChart": 0,
+   "coldLongest": 517,
+   "coldBlocked": 979,
+   "reloadMain": 418,
+   "reloadFcp": 432,
+   "reloadChart": 0,
+   "reloadLongest": 180
+  },
+  "empty back and forward": {
+   "clickMedian": 686,
+   "clickWorst": 1806,
+   "historyMedian": 130,
+   "historyWorst": 481
+  },
+  "demo and empty switching": {
+   "demoMain": 1283,
+   "realMain": 159
+  },
+  "small API": {
+   "status": {
+    "ms": 2,
+    "kb": 0
+   },
+   "documents": {
+    "ms": 9,
+    "kb": 12
+   },
+   "observations": {
+    "ms": 11,
+    "kb": 64
+   },
+   "lab-tests": {
+    "ms": 3,
+    "kb": 3
+   }
+  },
+  "small overview": {
+   "coldMain": 2178,
+   "coldFcp": 4636,
+   "coldChart": 6005,
+   "coldLongest": 1666,
+   "coldBlocked": 4655,
+   "reloadMain": 777,
+   "reloadFcp": 796,
+   "reloadChart": 1059,
+   "reloadLongest": 238
+  },
+  "small biomarkers": {
+   "coldMain": 1303,
+   "coldFcp": 2472,
+   "coldChart": 3725,
+   "coldLongest": 977,
+   "coldBlocked": 2632,
+   "reloadMain": 869,
+   "reloadFcp": 888,
+   "reloadChart": 1050,
+   "reloadLongest": 299
+  },
+  "small history": {
+   "coldMain": 1825,
+   "coldFcp": 3032,
+   "coldChart": 4412,
+   "coldLongest": 1043,
+   "coldBlocked": 3282,
+   "reloadMain": 940,
+   "reloadFcp": 956,
+   "reloadChart": 1079,
+   "reloadLongest": 261
+  },
+  "small compare": {
+   "coldMain": 1560,
+   "coldFcp": 3412,
+   "coldChart": 5028,
+   "coldLongest": 1429,
+   "coldBlocked": 5387,
+   "reloadMain": 1040,
+   "reloadFcp": 1116,
+   "reloadChart": 1296,
+   "reloadLongest": 372
+  },
+  "small documents": {
+   "coldMain": 1885,
+   "coldFcp": 3084,
+   "coldChart": 0,
+   "coldLongest": 692,
+   "coldBlocked": 1369,
+   "reloadMain": 1884,
+   "reloadFcp": 1920,
+   "reloadChart": 0,
+   "reloadLongest": 556
+  },
+  "small import": {
+   "coldMain": 1449,
+   "coldFcp": 2228,
+   "coldChart": 0,
+   "coldLongest": 431,
+   "coldBlocked": 876,
+   "reloadMain": 773,
+   "reloadFcp": 788,
+   "reloadChart": 0,
+   "reloadLongest": 296
+  },
+  "small overview snapshot": {
+   "stepMedian": 379,
+   "stepWorst": 849,
+   "longest": 812
+  },
+  "small biomarkers snapshot": {
+   "stepMedian": 249,
+   "stepWorst": 1877,
+   "longest": 1860
+  },
+  "small history snapshot": {
+   "stepMedian": 284,
+   "stepWorst": 1854,
+   "longest": 1832
+  },
+  "small compare snapshot": {
+   "stepMedian": 789,
+   "stepWorst": 1268,
+   "longest": 1215
+  },
+  "small timeline captures": {
+   "captures": 24,
+   "blank": 0,
+   "chartsRemoved": 0
+  },
+  "small back and forward": {
+   "clickMedian": 891,
+   "clickWorst": 1719,
+   "historyMedian": 593,
+   "historyWorst": 703
+  },
+  "small PDF preview": {
+   "loadedMedian": 1345,
+   "loadedWorst": 4838,
+   "nextFrameWorst": 17,
+   "longest": 2779
+  },
+  "demo and small switching": {
+   "demoMain": 907,
+   "realMain": 731
+  },
+  "large API": {
+   "status": {
+    "ms": 4,
+    "kb": 0
+   },
+   "documents": {
+    "ms": 19,
+    "kb": 150
+   },
+   "observations": {
+    "ms": 486,
+    "kb": 11447
+   },
+   "lab-tests": {
+    "ms": 9,
+    "kb": 3
+   }
+  },
+  "large overview": {
+   "coldMain": 3474,
+   "coldFcp": 5572,
+   "coldChart": 6425,
+   "coldLongest": 1435,
+   "coldBlocked": 5150,
+   "reloadMain": 1747,
+   "reloadFcp": 1768,
+   "reloadChart": 3081,
+   "reloadLongest": 1292
+  },
+  "large biomarkers": {
+   "coldMain": 4040,
+   "coldFcp": 5816,
+   "coldChart": 6530,
+   "coldLongest": 1651,
+   "coldBlocked": 5247,
+   "reloadMain": 2138,
+   "reloadFcp": 2176,
+   "reloadChart": 2803,
+   "reloadLongest": 634
+  },
+  "large history": {
+   "coldMain": 4323,
+   "coldFcp": 6524,
+   "coldChart": 7088,
+   "coldLongest": 1974,
+   "coldBlocked": 5782,
+   "reloadMain": 1938,
+   "reloadFcp": 1972,
+   "reloadChart": 2530,
+   "reloadLongest": 651
+  },
+  "large compare": {
+   "coldMain": 4055,
+   "coldFcp": 5788,
+   "coldChart": 6552,
+   "coldLongest": 1741,
+   "coldBlocked": 5249,
+   "reloadMain": 2202,
+   "reloadFcp": 2680,
+   "reloadChart": 3875,
+   "reloadLongest": 760
+  },
+  "large documents": {
+   "coldMain": 6911,
+   "coldFcp": 9612,
+   "coldChart": 0,
+   "coldLongest": 2028,
+   "coldBlocked": 4621,
+   "reloadMain": 2523,
+   "reloadFcp": 2652,
+   "reloadChart": 0,
+   "reloadLongest": 598
+  },
+  "large import": {
+   "coldMain": 6684,
+   "coldFcp": 9448,
+   "coldChart": 0,
+   "coldLongest": 2421,
+   "coldBlocked": 5034,
+   "reloadMain": 2456,
+   "reloadFcp": 3080,
+   "reloadChart": 0,
+   "reloadLongest": 977
+  },
+  "large overview snapshot": {
+   "stepMedian": 405,
+   "stepWorst": 2018,
+   "longest": 2028
+  },
+  "large biomarkers snapshot": {
+   "stepMedian": 590,
+   "stepWorst": 1293,
+   "longest": 1252
+  },
+  "large history snapshot": {
+   "stepMedian": 572,
+   "stepWorst": 1182,
+   "longest": 1143
+  },
+  "large compare snapshot": {
+   "stepMedian": 792,
+   "stepWorst": 2290,
+   "longest": 2229
+  },
+  "large timeline captures": {
+   "captures": 24,
+   "blank": 0,
+   "chartsRemoved": 0
+  },
+  "large back and forward": {
+   "clickMedian": 2694,
+   "clickWorst": 3125,
+   "historyMedian": 913,
+   "historyWorst": 1576
+  },
+  "large PDF preview": {
+   "loadedMedian": 1248,
+   "loadedWorst": 4019,
+   "nextFrameWorst": 10,
+   "longest": 1732
+  },
+  "demo and large switching": {
+   "demoMain": 1401,
+   "realMain": 1198
+  }
+ },
+ "failures": [],
+ "pauses": [],
+ "seconds": 1867,
+ "sleeps": 0
+}
