@@ -20,6 +20,7 @@ from .documents import utc_now
 from .models import AuthCredential, AuthSession
 
 COOKIE = "tiy_session"
+SECURE_COOKIE = "__Host-tiy_session"  # Browsers accept this name only over HTTPS, for this exact host and no subdomain.
 MIN_PASSPHRASE = 12
 MAX_PASSPHRASE = 1024  # Long enough for any passphrase, short enough that hashing one is not a way to tie up the service.
 IDLE_SECONDS = 3 * 24 * 3600

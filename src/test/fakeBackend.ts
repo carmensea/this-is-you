@@ -80,7 +80,7 @@ export function fakeImportServer(answer: Answer = { state: 'stored', extraction:
     signOut: vi.fn(async () => undefined),
     getIdentity: vi.fn(async () => ({ full_name: '', date_of_birth: null, previous_names: [], configured: false })),
     saveIdentity: vi.fn(async (d) => ({ ...d, configured: true })),
-    listBackups: vi.fn(async () => ({ location: '/private/backups', same_drive: true, backups: [], running: null, last_result: null })),
+    listBackups: vi.fn(async () => ({ location: '/private/backups', same_drive: true, key_configured: true, backups: [], running: null, last_result: null })),
     startBackup: vi.fn(async () => ({ started: true })),
     checkBackup: vi.fn(async () => ({ started: true })),
   };

@@ -81,5 +81,5 @@ export interface DocumentsBackend {
   getArchiveHealth(): Promise<ArchiveHealth>;
   signOut(everywhere: boolean): Promise<unknown>;
   startBackup(): Promise<unknown>;
-  checkBackup(name: string): Promise<unknown>;
+  checkBackup(name: string, passphrase?: string): Promise<unknown>;
 }

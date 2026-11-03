@@ -1,0 +1,9 @@
+# TEST ONLY: see compose.standin.yaml.
+{
+	admin off
+	skip_install_trust
+}
+https://archive.fictional.ts.net:8443 {
+	tls internal
+	reverse_proxy 127.0.0.1:8000
+}

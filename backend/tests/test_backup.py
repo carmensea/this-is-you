@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from this_is_you import backup
+from this_is_you.backup_crypto import make_key, save_key
 from this_is_you.backup import BackupProblem, check_archive, create_backup, hold_service_lock, restore_backup, trial_restore, verify_backup
 from this_is_you.config import Settings, UnsafeConfiguration, validate
 
@@ -161,6 +162,7 @@ def test_an_interrupted_backup_never_looks_like_a_backup(data_dir, tmp_path, mon
 
 def test_a_crash_leaves_an_incomplete_folder_that_is_refused_listed_and_cleared(data_dir, tmp_path):
     client = client_for(data_dir, backups_dir_override=tmp_path / "backups")
+    save_key(make_key("fictional backup passphrase"), client.app.state.settings.backup_key_path)
     upload(client, make_pdf("one"))
     jobs = client.app.state.backups
     leftover = tmp_path / "backups" / "this-is-you-backup-20260101T000000Z.incomplete"
@@ -174,7 +176,7 @@ def test_a_crash_leaves_an_incomplete_folder_that_is_refused_listed_and_cleared(
     assert client.post("/api/backups", headers=CLIENT_HEADERS).status_code == 202
     jobs.wait()
     listing = client.get("/api/backups").json()
-    assert [b["state"] for b in listing["backups"]] == ["complete"]
+    assert [b["state"] for b in listing["backups"]] == ["encrypted"]
     assert listing["backups"][0]["last_check"]["ok"] is True
     assert listing["last_result"]["ok"] is True
 
@@ -352,12 +354,10 @@ def test_the_api_runs_one_job_at_a_time_and_checks_by_name_only(data_dir, tmp_pa
     client = client_for(data_dir, backups_dir_override=tmp_path / "backups")
     upload(client, make_pdf("one"))
     assert client.post("/api/backups").status_code == 403  # Other websites cannot start one.
-    client.post("/api/backups", headers=CLIENT_HEADERS)
-    client.app.state.backups.wait()
-    name = client.get("/api/backups").json()["backups"][0]["name"]
+    name = create_backup(data_dir / "archive.sqlite3", data_dir / "originals", tmp_path / "backups").path.name
     assert client.post("/api/backups/..%2F..%2Fetc/check", headers=CLIENT_HEADERS).status_code in (404, 405)
     assert client.post("/api/backups/not-a-backup/check", headers=CLIENT_HEADERS).status_code == 404
-    assert client.post(f"/api/backups/{name}/check", headers=CLIENT_HEADERS).status_code == 202
+    assert client.post(f"/api/backups/{name}/check", json={}, headers=CLIENT_HEADERS).status_code == 202
     client.app.state.backups.wait()
     assert client.get("/api/backups").json()["last_result"]["ok"] is True
     assert verify_backup(tmp_path / "backups" / name).ok  # Recording a check does not spoil the backup.

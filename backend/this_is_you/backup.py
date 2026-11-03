@@ -23,7 +23,7 @@ from pathlib import Path
 
 from alembic.script import ScriptDirectory
 
-from .backup_crypto import EXTENSION, CannotOpen, open_into, seal_folder
+from .backup_crypto import EXTENSION, BackupKey, CannotOpen, load_key, open_into, seal_folder
 from .config import Settings, enclosing_git_repository
 from .db import _config
 
@@ -34,6 +34,7 @@ MANIFEST = "manifest.json"
 DATABASE = "archive.sqlite3"
 LAST_CHECK = "last-check.json"  # Written after a check. Not part of the backup's contents.
 INCOMPLETE_SUFFIX = ".incomplete"
+CHECK_SUFFIX = ".check.json"  # Beside an encrypted backup, which cannot hold it.
 LOCK_FILE = "service.lock"
 _NAME = re.compile(r"this-is-you-backup-\d{8}T\d{6}Z(-\d+)?")
 _ORIGINAL = re.compile(r"originals/([0-9a-f]{2})/([0-9a-f]{2})/\1\2[0-9a-f]{60}\.pdf")
@@ -140,6 +141,15 @@ def require_destination(destination: Path) -> None:
     """A drive that is not connected must not turn into a new folder on this one, holding a backup nobody expects there."""
     if not destination.expanduser().parent.is_dir():
         raise BackupProblem(f"{destination.parent} does not exist. If it is on another drive, check that the drive is connected.")
+
+
+DRIVE_MARKER = ".this-is-you-backups"
+
+
+def require_drive(settings: Settings, destination: Path) -> None:
+    """In production the default folder is a mount point, which still exists with nothing plugged in. Writing there would fill the system disk with what looks like a safe copy."""
+    if settings.production and not (destination / DRIVE_MARKER).exists():
+        raise BackupProblem("The backup drive is not connected, or has not been prepared. Nothing was written. See docs/deployment.md.")
 
 
 def on_same_drive(destination: Path, data_dir: Path) -> bool:
@@ -263,7 +273,7 @@ def _check_database(path: Path, expected_counts: dict | None) -> tuple[list[str]
     return problems, documents
 
 
-def create_encrypted_backup(settings: Settings, destination: Path, passphrase: str) -> BackupResult:
+def create_encrypted_backup(settings: Settings, destination: Path, key: BackupKey, on_progress=lambda done, total: None) -> BackupResult:
     """Seals a checked backup into one file on `destination`, which never sees a plain copy, even after a crash.
 
     shortcut: the plain copy is built in the archive's own folder first, so a backup needs room for the archive again there. Stream the originals straight into the seal if that ever matters.
@@ -276,16 +286,17 @@ def create_encrypted_backup(settings: Settings, destination: Path, passphrase: s
     staging.mkdir(mode=0o700)
     work: Path | None = None
     try:
-        result = create_backup(settings.database_path, settings.originals_dir, staging, staging=True)
+        result = create_backup(settings.database_path, settings.originals_dir, staging, on_progress, staging=True)
         check = verify_backup(result.path)
         if not check.ok:
             raise BackupProblem("This backup failed its check, so it was not sealed. " + " ".join(check.problems))
         final = destination / (result.path.name + EXTENSION)
         work = final.with_name(final.name + INCOMPLETE_SUFFIX)
-        seal_folder(result.path, work, passphrase)
+        file_key = seal_folder(result.path, work, key)
+        # Opened with this file's own key, gone when this returns. The passphrase is not here, and is not needed for this test.
         trial = staging / "trial"
         try:
-            open_into(work, trial, passphrase)
+            open_into(work, trial, None, file_key)
         except CannotOpen:
             raise BackupProblem("The sealed copy could not be opened again, so it was not kept.") from None
         if not (check := verify_backup(trial)).ok:
@@ -506,14 +517,26 @@ def trial_restore(folder: Path) -> Check:
 
 # ---- The jobs behind the API. One at a time, in the background.
 
-def _record_check(folder: Path, check: Check) -> None:
+def _check_file(path: Path) -> Path:
+    return path / LAST_CHECK if path.is_dir() else path.with_name(path.name + CHECK_SUFFIX)
+
+
+def _record_check(path: Path, check: Check) -> None:
     payload = {"checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "ok": check.ok, "problems": check.problems}
-    temp = folder / (LAST_CHECK + ".tmp")
+    target = _check_file(path)
+    temp = target.with_name(target.name + ".tmp")
     temp.unlink(missing_ok=True)
     fd = os.open(temp, os.O_CREAT | os.O_WRONLY, 0o600)
     with os.fdopen(fd, "w") as out:
         json.dump(payload, out)
-    os.replace(temp, folder / LAST_CHECK)
+    os.replace(temp, target)
+
+
+def _last_check(path: Path) -> dict | None:
+    try:
+        return json.loads(_check_file(path).read_text())
+    except (OSError, ValueError):
+        return None
 
 
 def describe(folder: Path) -> dict:
@@ -521,18 +544,14 @@ def describe(folder: Path) -> dict:
     if folder.name.endswith(INCOMPLETE_SUFFIX):
         return {"name": folder.name, "state": "incomplete", "created_at": None, "documents": None, "bytes": None, "last_check": None}
     if folder.is_file():
-        return {"name": folder.name, "state": "encrypted", "created_at": None, "documents": None, "bytes": folder.stat().st_size, "last_check": None}
+        return {"name": folder.name, "state": "encrypted", "created_at": None, "documents": None, "bytes": folder.stat().st_size, "last_check": _last_check(folder)}
     try:
         manifest = json.loads((folder / MANIFEST).read_text())
         files, counts = manifest["files"], manifest["counts"]
         info = {"state": "complete", "created_at": manifest.get("created_at"), "documents": counts.get("documents"), "bytes": sum(f["bytes"] for f in files)}
     except (OSError, ValueError, KeyError, TypeError):
         info = {"state": "damaged", "created_at": None, "documents": None, "bytes": None}
-    try:
-        last_check = json.loads((folder / LAST_CHECK).read_text())
-    except (OSError, ValueError):
-        last_check = None
-    return {"name": folder.name, **info, "last_check": last_check}
+    return {"name": folder.name, **info, "last_check": _last_check(folder)}
 
 
 def _is_backup(path: Path) -> bool:
@@ -563,8 +582,7 @@ class PruneItem:
 def plan_prune(settings: Settings, keep: int, include_replaced: bool) -> list[PruneItem]:
     """What `prune` would remove. Unfinished work, backups past the newest `keep`, and replaced archives if asked.
 
-    The newest backup whose last check passed always stays. Encrypted ones cannot be checked without the passphrase,
-    so they count only by age.
+    The newest backup whose last check passed always stays.
     """
     root = settings.backups_dir
     plan: list[PruneItem] = []
@@ -580,12 +598,17 @@ def plan_prune(settings: Settings, keep: int, include_replaced: bool) -> list[Pr
     return plan
 
 
+def _remove(path: Path) -> None:
+    if path.is_dir():
+        _remove_tree(path)
+    else:
+        path.unlink(missing_ok=True)
+        path.with_name(path.name + CHECK_SUFFIX).unlink(missing_ok=True)
+
+
 def apply_prune(plan: list[PruneItem]) -> None:
     for item in plan:
-        if item.path.is_dir():
-            _remove_tree(item.path)
-        else:
-            item.path.unlink(missing_ok=True)
+        _remove(item.path)
 
 
 class BackupJobs:
@@ -605,9 +628,14 @@ class BackupJobs:
         return [describe(p) for p in sorted(found, key=lambda p: p.name, reverse=True)]
 
     def folder(self, name: str) -> Path:
-        if not _NAME.fullmatch(name) or not (self.settings.backups_dir / name).is_dir():
+        path = self.settings.backups_dir / name
+        if name.endswith(INCOMPLETE_SUFFIX) or "/" in name or not _is_backup(path):
             raise KeyError(name)
-        return self.settings.backups_dir / name
+        return path
+
+    @property
+    def key(self) -> BackupKey | None:
+        return load_key(self.settings.backup_key_path)
 
     def _start(self, job: dict, work) -> bool:
         with self._lock:
@@ -640,23 +668,27 @@ class BackupJobs:
         def work() -> dict:
             root = self.settings.backups_dir
             require_destination(root)
+            require_drive(self.settings, root)
             root.mkdir(exist_ok=True, mode=0o700)
             # Only this job writes here, and it is not running yet, so these are leftovers from a crash.
             for leftover in root.iterdir():
-                if leftover.name.endswith(INCOMPLETE_SUFFIX) and _NAME.fullmatch(leftover.name.removesuffix(INCOMPLETE_SUFFIX)):
-                    _remove_tree(leftover)
-            result = create_backup(self.settings.database_path, self.settings.originals_dir, root, progress)
-            check = trial_restore(result.path)
+                if leftover.name.endswith(INCOMPLETE_SUFFIX) and _is_backup(leftover):
+                    _remove(leftover)
+            key = self.key
+            if key is None:
+                raise BackupProblem("Set a backup passphrase first: npm run backend -- backup-key set. Nothing was written.")
+            result = create_encrypted_backup(self.settings, root, key, progress)
+            check = Check(not result.problems, result.problems)
             _record_check(result.path, check)
             return {"name": result.path.name, "ok": check.ok, "problems": check.problems}
 
         return self._start({"kind": "backup", "done": 0, "total": 0}, work)
 
-    def start_check(self, name: str) -> bool:
+    def start_check(self, name: str, passphrase: str | None = None) -> bool:
         folder = self.folder(name)
 
         def work() -> dict:
-            check = trial_restore(folder)
+            check = verify_sealed(folder, self.settings.staging_dir, passphrase or "") if folder.is_file() else trial_restore(folder)
             _record_check(folder, check)
             return {"ok": check.ok, "problems": check.problems}
 

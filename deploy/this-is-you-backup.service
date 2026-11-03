@@ -1,0 +1,9 @@
+[Unit]
+Description=This Is You: encrypted backup to the backup drive
+# Change WorkingDirectory if this repository is somewhere else.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/this-is-you
+# Fails, and shows in systemctl status, when the drive is not connected. Nothing is written elsewhere.
+ExecStart=/usr/bin/docker compose exec -T app python -m this_is_you backup

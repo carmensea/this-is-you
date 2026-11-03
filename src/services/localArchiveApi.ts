@@ -322,7 +322,7 @@ export async function connectLocalArchive(): Promise<{ api: ArchiveApi; backend:
     saveIdentity: (details) => post('/api/identity', details, 'PUT'),
     listBackups: () => getJson('/api/backups', []),
     startBackup: () => post('/api/backups'),
-    checkBackup: (name) => post(`/api/backups/${name}/check`),
+    checkBackup: (name, passphrase) => post(`/api/backups/${name}/check`, { passphrase: passphrase ?? null }),
   };
   const api: ArchiveApi = {
     loadArchive: async () => {

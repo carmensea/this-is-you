@@ -18,6 +18,7 @@ Needs Node 20 or newer and Python 3.11 or newer. These commands assume macOS or 
 ```sh
 npm install
 npm run backend:setup     # once: creates backend/.venv and installs exact dependency versions
+git config core.hooksPath .githooks   # once per clone: refuses records, backups and secrets at commit and push
 ```
 
 Then, in two terminals:
@@ -41,8 +42,14 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 | `npm run build` | Typecheck, then production build to `dist/` |
 | `npm run perf -- --label X` | Browser timings and checks on synthetic archives, about 30 minutes, written to `tools/perf/results/` (needs Chrome and a prior build) |
 | `npm run perf:compare -- <old dist> <new dist>` | Alternates two builds to judge a change, about 15 minutes |
+| `npm run deploy:https-flow` | The app in production mode in Chrome, through an HTTPS proxy like `tailscale serve`, on a fictional archive |
+| `deploy/test/verify-vm.sh PHASE` | The Compose deployment on a real Linux machine, with attacks and crashes. **Wipes `/srv/this-is-you`: throwaway machines only.** |
 | `npm run readiness:dev` | Sign in, import and sign out through the real dev server, on a fictional archive. About 1 minute. |
 | `npm run readiness -- [--scale 1]` | The whole import, crash, backup and restore workflow in Chrome, on a messy fictional folder. About 4 minutes at scale 1. Needs a prior build. |
+
+## Self-hosting
+
+To run it on an always-on Linux machine, reached privately through Tailscale, see **[docs/deployment.md](docs/deployment.md)**: Docker Compose, encrypted backups, updates, disaster recovery, and what must be checked on real hardware. Tested results are in [docs/reports/](docs/reports/).
 
 ## Where your documents live
 
@@ -72,6 +79,10 @@ Settings are environment variables:
 | `THIS_IS_YOU_BACKUP_DIR` | beside the archive, named `ThisIsYou Backups` | Refused inside the archive or a Git repository. Point it at another drive to survive losing this one. |
 | `THIS_IS_YOU_PORT` | 8000 | Set it for both `npm run backend` and `npm run dev` |
 | `THIS_IS_YOU_HOST` | 127.0.0.1 | Loopback only. Any other address stops the service from starting. |
+| `THIS_IS_YOU_PUBLIC_ORIGIN` | none | Production: the one https address it answers on. Also requires a working sandbox. |
+| `THIS_IS_YOU_WEB_DIR` | none | Production: the built app, served by this service |
+| `THIS_IS_YOU_READER_SOCKET` | none | Production: where the reader container listens |
+| `THIS_IS_YOU_REQUIRE_SANDBOX` | off | Set to `1` to stop reading without a working sandbox, outside production too |
 
 ## How uploads work
 
@@ -108,13 +119,14 @@ A flag never refuses, removes or verifies anything. Only English labels are reco
 
 ## Backups
 
-**Back up now** on the Import screen writes a backup and restores it into a temporary folder to test it. From the command line, with the service running or not:
+**Back up now** on the Import screen writes an encrypted backup and tests it. It stays off until you choose a backup passphrase. From the command line, with the service running or not:
 
 ```sh
-npm run backend -- backup [--to FOLDER]     # Write one, then check it
+npm run backend -- backup-key set           # Once: choose the passphrase backups are encrypted for. It is not stored.
+npm run backend -- backup [--to FOLDER]     # Write an encrypted one, and test it
 npm run backend -- verify BACKUP            # Check every byte and relationship. Changes nothing.
 npm run backend -- restore BACKUP --to NEW_FOLDER
-npm run backend -- backup --encrypt --to FOLDER   # One encrypted file. Asks for a passphrase of its own.
+npm run backend -- backup --plain           # An unencrypted folder. Anyone who can read it can read every record.
 npm run backend -- prune [--keep 3] [--include-replaced] [--yes]   # Lists old backups and leftovers. Removes them only with --yes.
 ```
 
@@ -124,11 +136,12 @@ npm run backend -- prune [--keep 3] [--include-replaced] [--yes]   # Lists old b
 - **Damage is caught:** a changed, missing or extra file, a damaged database, broken relationships, an edited manifest, or a backup from a newer version. Nothing is restored from a backup that fails.
 - **Your archive is protected.** Restoring into a folder that holds files needs its exact name typed, refuses while a service is using it, checks the new copy completely first, and moves the old folder to `*.replaced-*` instead of deleting it. To start using a restored folder, point `THIS_IS_YOU_DATA_DIR` at it.
 
-- **Encrypted backups** seal a checked backup into one file. Changing, reordering, removing or adding anything stops it opening. The destination never holds a plain copy, even after a crash. `verify` and `restore` accept the file and ask for its passphrase. **Lose that passphrase and the backup is gone, by design.**
+- **Encrypted by default.** A checked backup is sealed into one file. Changing, reordering, removing or adding anything stops it opening. The destination never holds a plain copy, even after a crash. `verify` and `restore` accept the file and ask for its passphrase. **Lose that passphrase and those backups are gone, by design.**
+- **This machine cannot open its own backups.** It keeps only a public key, so it can write them with no passphrase around, and a compromised machine cannot read the ones already written.
 - **Other drives:** the app says when backups share the archive's drive. A destination whose parent folder is missing is refused, so an unplugged drive never becomes a surprise folder on this one.
 - **Sign-in details are never in a backup.** A restored archive stays closed until you run `set-passphrase` for it.
 
-**Not covered.** **Back up now** writes a plain, unencrypted backup. Encrypted ones are command line only, so nothing makes them on a schedule yet. Old backups go only when you run `prune`. An encrypted backup needs room for a full plain copy in the archive folder while it is built.
+**Not covered.** Old backups go only when you run `prune`. An encrypted backup needs room for a full plain copy in the archive folder while it is built. A schedule is part of [self-hosting](docs/deployment.md), not this local setup.
 
 ## Reading, reviewing and verifying
 
@@ -183,7 +196,7 @@ Each document has three separate statuses:
 
 **Untrusted files.** PDFs are read by `pypdf` in a separate short-lived process, never in the service itself. That process has a wall-clock limit (45 seconds), a CPU limit (30 seconds), a memory limit (1 GB), no write access to files, no core dumps, an empty environment, and Python's network functions disabled. It reads at most 30 pages and 400,000 characters. Only a small summary comes back, which the service checks before saving: the full text never leaves the process and is not stored. Its error output is discarded so that document text cannot reach a log.
 
-**Sandbox.** The reader receives the document as an open file and is never told a path. An operating-system sandbox blocks network, writing, other programs, and reading anything but Python and system libraries (`sandbox-exec` on macOS, `bubblewrap` on Linux). Without one, it runs with the limits above only and says so in `doctor`, the log and the Import screen. On Linux, install `bubblewrap`. This contains a bad file. It does not prevent one, and a subverted reader could still return false results for that document, which stay unverified until you check them.
+**Sandbox.** The reader receives the document as an open file and is never told a path. It runs with no network, no writing, no other programs and no view of the archive: in its own container in production, under `sandbox-exec` on macOS, and under `bubblewrap` on Linux where the system allows it (stock Ubuntu 24.04 does not). This is tested at every start against what it should block. In production, without a working sandbox, files are stored and stay unread, and the app says so. In development it runs with the limits above and says so. This contains a bad file. It does not prevent one, and a subverted reader could still return false results for that document, which stay unverified until you check them.
 
 ## API
 
@@ -213,7 +226,7 @@ Each document has three separate statuses:
 | `GET /api/backups/archive-health` | What the last start recovered, set aside or could not find, and whether the reader is sandboxed. |
 | `GET /api/identity`, `PUT /api/identity` | Your details, used only to raise flags |
 | `GET /api/backups`, `POST /api/backups` | List backups, or start one |
-| `POST /api/backups/{name}/check` | Test-restore a backup into a temporary folder |
+| `POST /api/backups/{name}/check` | Test-restore a backup. An encrypted one needs its passphrase in the body, used in memory for this check. |
 | `GET /api/status` | Whether the service is up, and the size limit |
 
 ## Performance
@@ -288,6 +301,8 @@ backend/
     api/            HTTP routes
   tests/
 tools/          perf/: browser timings. readiness/: the whole workflow on a messy fictional folder.
+deploy/        Compose support files, host setup, the isolation check and the Linux test
+docs/deployment.md  Self-hosting, updates and disaster recovery
 docs/threat-model.md  Who this defends against, how, and what it cannot stop
 docs/data-model.md  How future record types will attach to documents
 src/

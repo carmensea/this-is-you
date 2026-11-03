@@ -539,7 +539,7 @@ export class AppStore {
     }
   };
   startBackup = () => this.backupAction((backend) => backend.startBackup());
-  checkBackup = (name: string) => this.backupAction((backend) => backend.checkBackup(name));
+  checkBackup = (name: string, passphrase?: string) => this.backupAction((backend) => backend.checkBackup(name, passphrase));
 
   // Decisions on real documents. The service keeps them; this only shows what it confirms it saved.
   private async saving(request: (backend: DocumentsBackend) => Promise<unknown>): Promise<boolean> {

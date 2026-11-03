@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily encrypted backup of This Is You
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+# Runs at the next start if the machine was off when it was due.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

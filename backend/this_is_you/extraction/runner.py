@@ -10,7 +10,8 @@ from datetime import date
 from pathlib import Path
 from typing import BinaryIO
 
-from .sandbox import wrap
+from .reader_service import TIMED_OUT, client_exchange
+from .sandbox import reader_socket, wrap
 from .worker import EXIT_MEMORY
 
 _STATUSES = {"extracted", "partial", "image_only", "encrypted", "no_text", "failed", "too_complex"}
@@ -106,6 +107,18 @@ def worker_command(limits: Limits, today: date) -> list[str]:
     return [sys.executable, "-I", "-m", "this_is_you.extraction.worker", payload, today.isoformat()]
 
 
+class ReaderUnavailable(Exception):
+    """The reader could not be reached at all. Says nothing about the document, which should stay in the queue."""
+
+
+def _interpret(code: int, stdout: bytes) -> ExtractionResult:
+    if code == TIMED_OUT or code in (EXIT_MEMORY, -signal.SIGXCPU, -signal.SIGKILL, -signal.SIGSEGV):
+        return ExtractionResult("too_complex")
+    if code != 0:
+        return ExtractionResult("failed")
+    return parse_output(stdout)
+
+
 def run_command(command: list[str], wall_seconds: float, document: BinaryIO | int = subprocess.DEVNULL) -> ExtractionResult:
     # stderr goes nowhere: it could hold document text, and this is what keeps it out of every log.
     process = subprocess.Popen(command, stdin=document, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env={}, close_fds=True, start_new_session=True)
@@ -115,16 +128,28 @@ def run_command(command: list[str], wall_seconds: float, document: BinaryIO | in
         process.kill()
         process.communicate()
         return ExtractionResult("too_complex")
-    if process.returncode in (EXIT_MEMORY, -signal.SIGXCPU, -signal.SIGKILL, -signal.SIGSEGV):
-        return ExtractionResult("too_complex")
-    if process.returncode != 0:
-        return ExtractionResult("failed")
-    return parse_output(stdout)
+    return _interpret(process.returncode, stdout)
+
+
+def _read_remotely(socket_path: str, document: BinaryIO, limits: Limits, today: date) -> ExtractionResult:
+    request = {
+        "op": "read", "today": today.isoformat(), "wall_seconds": limits.wall_seconds,
+        "limits": {"cpu_seconds": limits.cpu_seconds, "memory_bytes": limits.memory_bytes, "max_pages": limits.max_pages, "max_chars": limits.max_chars},
+    }
+    try:
+        code, stdout = client_exchange(socket_path, request, document.fileno(), limits.wall_seconds + 15)
+    except (FileNotFoundError, ConnectionRefusedError) as problem:
+        raise ReaderUnavailable from problem
+    except OSError:
+        return ExtractionResult("failed")  # It had the file and then went away. Possibly because of the file, so no endless retry.
+    return _interpret(code, stdout)
 
 
 def extract(path: Path, limits: Limits = Limits(), today: date | None = None) -> ExtractionResult:
     try:
         with path.open("rb") as document:
+            if (socket_path := reader_socket()) is not None:
+                return _read_remotely(socket_path, document, limits, today or date.today())
             return run_command(wrap(worker_command(limits, today or date.today())), limits.wall_seconds, document)
     except OSError:
         return ExtractionResult("failed")

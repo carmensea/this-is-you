@@ -304,12 +304,13 @@ export interface ArchiveHealth {
   recovered: number;
   set_aside: number;
   missing: number;
-  reader_isolation: 'sandboxed' | 'basic';
+  reader_isolation: 'sandboxed' | 'basic' | 'unavailable';
 }
 
 export interface BackupListing {
   location: string;
   same_drive: boolean;
+  key_configured: boolean;
   backups: BackupEntry[];
   running: { kind: 'backup' | 'check'; name?: string; done: number; total: number } | null;
   last_result: { kind: 'backup' | 'check'; name: string | null; ok: boolean; problems: string[] } | null;

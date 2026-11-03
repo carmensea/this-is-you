@@ -1,0 +1,315 @@
+Linux verification, raw results. Fictional records only. Ubuntu 24.04.5, ARM64.
+
+--- setup: a clean machine
+Backup drive ready at /mnt/this-is-you/backup-drive.
+Host ready. Next: docs/deployment.md.
+PASS the stack comes up healthy on a clean machine
+PASS the archive folder belongs to the app's account, and nobody else can enter
+PASS an archive with no passphrase says so
+PASS and stays closed
+PASS set-passphrase works through docker exec
+PASS status now reports it set
+RESULT setup: 6 passed, 0 failed
+--- posture: what each container is allowed
+PASS net: read-only root filesystem
+PASS net: every capability dropped
+PASS net: no-new-privileges
+PASS net: restarts after a crash or reboot
+PASS net: not privileged
+PASS app: read-only root filesystem
+PASS app: every capability dropped
+PASS app: no-new-privileges
+PASS app: restarts after a crash or reboot
+PASS app: not privileged
+PASS reader: read-only root filesystem
+PASS reader: every capability dropped
+PASS reader: no-new-privileges
+PASS reader: restarts after a crash or reboot
+PASS reader: not privileged
+PASS proxy: read-only root filesystem
+PASS proxy: every capability dropped
+PASS proxy: no-new-privileges
+PASS proxy: restarts after a crash or reboot
+PASS proxy: not privileged
+PASS app runs as its own unprivileged account
+PASS reader runs as a different unprivileged account
+PASS reader has no network
+PASS reader's only mount is its socket
+PASS the net service runs as nobody
+PASS app shares only the proxy's network
+PASS app publishes no ports of its own
+PASS nothing listens on the host on the app's port
+PASS the test proxy is bound to loopback only
+PASS the test proxy is not on all interfaces
+PASS the machine's LAN address does not answer on the proxy port
+PASS the machine's LAN address does not answer on the app port
+PASS no port is published in the production file
+PASS Funnel is off in the serve configuration
+PASS the app reports the reader container passed its test
+PASS the image holds no test or dev files
+PASS the app cannot change its own code
+RESULT posture: 37 passed, 0 failed
+--- attacks: code in the reader container, as if a PDF had subverted it
+PASS reader cannot reach the internet
+PASS reader cannot reach the machine's gateway
+PASS reader cannot reach the app
+PASS reader cannot resolve a name
+PASS reader cannot read the archive
+PASS reader cannot list the archive
+PASS reader cannot read backups
+PASS reader cannot write to its disk
+PASS reader cannot write to /tmp
+PASS reader cannot change its code
+PASS reader cannot become root
+PASS reader cannot mount something
+PASS reader cannot create a user namespace
+PASS reader cannot read the reader service's memory
+PASS reader cannot attach to the reader service
+PASS the attack really did see the reader service
+PASS only loopback exists in the reader
+--- attacks: the worker's own limits, on real Linux
+PASS a limited worker cannot start processes
+PASS a limited worker cannot write files
+PASS a limited worker cannot take too much memory
+PASS a limited worker cannot open many files
+--- attacks: a subverted worker takes the reader's socket
+PASS the socket can be replaced from inside the reader
+PASS the reader rebuilds it
+--- attacks: the file handed to the reader
+PASS the reader can read the file it was handed
+PASS it cannot write through it
+PASS it cannot truncate it
+PASS it cannot reopen it for writing
+PASS it cannot look around the folder it came from
+RESULT attacks: 28 passed, 0 failed
+--- auth: through the HTTPS proxy
+PASS the app loads with no session
+PASS the app has a content policy
+PASS HTTPS is pinned
+PASS no session, no answer: documents
+PASS no session, no answer: identity
+PASS no session, no answer: backups
+PASS no session, no answer: import-batches
+PASS no session, no answer: observations
+PASS no session, no answer: backups/archive-health
+PASS no session, no answer: documents/00000000000000000000000000000000/content
+PASS a wrong passphrase is refused
+PASS signing in without the app header is refused
+PASS signing in from another origin is refused
+PASS the right passphrase signs in
+PASS the cookie is the host-only secure kind
+PASS the session opens the archive
+PASS another origin is refused with a valid session
+PASS a sibling site is refused with a valid session
+PASS a change without the app header is refused with a valid session
+PASS another host name gets no records through the proxy
+PASS a forged forwarded host gets no records through the proxy
+PASS asked directly, the app answers only to its exact name
+PASS the development cookie means nothing here
+PASS plain HTTP to the proxy gets no archive
+PASS going around the proxy from inside gets nothing
+PASS another container on the proxy's network cannot reach the app
+PASS uploading through the proxy works
+PASS the reader container reads them
+PASS they were really read, in the other container
+PASS the original comes back to its session
+PASS and not without one
+PASS the passphrase is not in any log
+PASS filenames are not in any log
+PASS contents are not in any log
+RESULT auth: 34 passed, 0 failed
+--- failsafe: production without a working reader
+PASS with the reader stopped, files are still stored
+PASS and wait, unread
+PASS the service log says why, with no document details
+PASS when the reader returns, it catches up with nothing lost
+PASS and that file was read
+PASS a reader given the network is caught by its test, and reading stops
+The PDF reader's sandbox did not pass its test: network.
+Reading is stopped until this is fixed. Files are still stored, and will be read after a restart.
+PASS doctor says it is stopped (network)
+PASS a new file stays unread (network)
+PASS with the reader put right and restarted, it is read (network)
+PASS a reader given the archive is caught by its test, and reading stops
+The PDF reader's sandbox did not pass its test: reading the archive, writing to the archive.
+Reading is stopped until this is fixed. Files are still stored, and will be read after a restart.
+PASS doctor says it is stopped (archive)
+PASS a new file stays unread (archive)
+PASS with the reader put right and restarted, it is read (archive)
+PASS the app is back to a passing test
+RESULT failsafe: 14 passed, 0 failed
+--- backups: encrypted, on a separate filesystem
+PASS Back up now is off until there is a key
+PASS and asks for one
+PASS setting the backup key works
+PASS the key file does not hold the passphrase
+PASS and holds only public parts
+PASS the listing knows this is a separate drive
+PASS Back up now succeeds
+PASS and it is encrypted
+PASS the backup drive holds only the sealed file, its check and its marker
+PASS nothing readable is in it
+PASS no record text is in it
+PASS no plain copy stayed in the archive folder
+PASS the wrong passphrase cannot open it
+PASS the right one opens and verifies it
+PASS a folder that is not a prepared drive is refused
+PASS a plain backup needs asking for, and says what it is
+PASS with the drive unplugged, the app sees an empty mount point
+PASS Back up now refuses
+PASS and nothing landed on the system disk
+PASS the empty mount point cannot be written by the app
+PASS the command line refuses too
+PASS plugged back in, the app sees it with no restart
+PASS plugged back in, with no restart, it works again
+PASS the app sees the older backups again too
+PASS same document count after all that
+PASS a changed byte is caught
+--- disaster recovery: the archive folder is gone
+PASS restoring from the drive works
+PASS the stack starts on the restored archive
+PASS it stays closed until given a passphrase, as sign-in details are never backed up
+PASS every document came back
+PASS every original's bytes came back
+PASS relationships are intact
+RESULT backups: 32 passed, 0 failed
+--- crashes: real kills of real processes
+PASS killing app: it comes back by itself
+PASS killing app: the app is healthy again
+PASS killing app: the session still works
+PASS killing app: no documents lost or added
+PASS killing reader: it comes back by itself
+PASS killing reader: the app is healthy again
+PASS killing reader: the session still works
+PASS killing reader: no documents lost or added
+PASS killing proxy: it comes back by itself
+PASS killing proxy: the app is healthy again
+PASS killing proxy: the session still works
+PASS killing proxy: no documents lost or added
+PASS killing net: it comes back by itself
+PASS killing net: the app is healthy again
+PASS killing net: the session still works
+PASS killing net: no documents lost or added
+--- crashes: kill the app in the middle of uploads
+PASS sending them all again gives exactly one of each
+PASS the database is intact
+PASS every one gets read
+PASS a stopped stack stays stopped: no restart after docker compose stop
+PASS two services on one archive are refused
+RESULT crashes: 21 passed, 0 failed
+--- update: a new image, an older schema
+PASS the new image starts and migrates the older schema
+PASS it really is the new image
+PASS a copy of the old database was kept first
+PASS every record is unchanged
+PASS going back to the previous image works when the schema has not changed
+RESULT update: 5 passed, 0 failed
+--- isolation: an agent's account, and another hosted app
+    Checking as: agent (agent)
+    PASS not root
+    PASS not in the docker group
+    PASS not in an admin group
+    PASS no passwordless sudo
+    PASS cannot talk to Docker
+    PASS cannot read /srv/this-is-you/data
+    PASS cannot read /srv/this-is-you/data/archive.sqlite3
+    PASS cannot read /srv/this-is-you/data/originals
+    PASS cannot read /srv/this-is-you/tailscale
+    PASS cannot read /srv/this-is-you/secrets
+    PASS cannot read /mnt/this-is-you/backup-drive
+    NOTE port 8443 answers on this machine's loopback. In production nothing should.
+    This account cannot reach the archive through these paths.
+PASS an ordinary agent account passes the isolation check
+PASS the check catches an agent added to the docker group
+PASS the agent is really refused
+PASS the agent cannot reach Docker's socket
+PASS another hosted app's container cannot reach this one
+PASS and shares none of its storage
+RESULT isolation: 6 passed, 0 failed
+--- the real Tailscale image, hardened as in production, with a fake key and no tailnet
+    proxy-1  | 2026/11/03 21:42:12 health(warnable=warming-up): error: Tailscale is starting. Please wait.
+    proxy-1  | 2026/11/03 21:42:12 health(warnable=wantrunning-false): ok
+    proxy-1  | 2026/11/03 21:42:12 localapi: [POST] /localapi/v0/login-interactive
+    proxy-1  | 2026/11/03 21:42:12 error calling getent for user "10003": exit status 2
+    proxy-1  | 2026/11/03 21:42:12 StartLoginInteractiveAs(""): url=false
+    proxy-1  | 2026/11/03 21:42:12 control: client.Login(2)
+    proxy-1  | 2026/11/03 21:42:12 control: LoginInteractive -> regen=true
+    proxy-1  | 2026/11/03 21:42:12 control: doLogin(regen=true, hasUrl=false)
+    proxy-1  | 2026/11/03 21:42:12 control: control server key from https://controlplane.tailscale.com: ts2021=[fSeS+], legacy=[nlFWp]
+    proxy-1  | 2026/11/03 21:42:12 control: Generating a new nodekey.
+    proxy-1  | 2026/11/03 21:42:12 control: RegisterReq: onode= node=[Tr3CH] fup=false nks=false
+    proxy-1  | 2026/11/03 21:42:17 health(warnable=warming-up): ok
+PASS it runs as its own unprivileged account
+PASS no permission problems with this hardening
+PASS no other read-only filesystem problems
+PASS the daemon starts in userspace mode
+PASS the key file is read, and a fake key is refused by Tailscale's own server
+PASS the state folder is private
+PASS it publishes nothing on the host
+PASS the stand-in stack comes back afterwards
+RESULT tailscale-image: 8 passed, 0 failed
+--- the daily backup timer, run once by hand
+PASS the timer is scheduled
+PASS the service succeeds
+PASS and one more encrypted backup is on the drive
+PASS with the drive unplugged, the service fails visibly
+PASS and nothing landed on the system disk
+PASS signed in again, ready for a reboot
+RESULT timer: 6 passed, 0 failed
+
+--- Chrome on the host, through a tunnel, against the deployed stack
+PASS the built app loads with no session
+PASS a wrong passphrase is refused
+PASS Chrome accepted the secure cookie: {"secure":true,"sameSite":"Strict","domain":"archive.fictional.ts.net"}
+PASS page code cannot read it
+PASS bundled fonts load under the content policy: 6 faces
+PASS importing a folder works through the proxy
+PASS messy folder through the deployment: read: 350 of 350
+PASS messy folder through the deployment: partial: 20 of 20
+PASS messy folder through the deployment: duplicate: 30 of 30
+PASS messy folder through the deployment: scanned: 40 of 40
+PASS messy folder through the deployment: encrypted: 15 of 15
+PASS messy folder through the deployment: no_text: 10 of 10
+PASS messy folder through the deployment: unsupported: 32 of 32
+PASS messy folder through the deployment: failed: 27 of 27
+PASS one document per distinct file: 440 added from 524 files, in 194 s
+PASS the original is served to its session: {"count":454,"status":200,"type":"application/pdf","hsts":"max-age=31536000","cache":"no-store"}
+PASS it is marked not to be stored by the browser
+PASS the PDF viewer frame loads under the content policy
+PASS Back up now writes an encrypted, tested file: this-is-you-backup-20261103T214642Z.tiyb
+PASS testing with the wrong passphrase fails
+PASS and the browser says so
+PASS testing with the right one passes
+PASS signing out ends the session
+PASS the demo opens under the content policy
+PASS no outside requests
+PASS no page or content policy errors
+All passed.
+
+--- after the import
+app open files after the import: 26
+this-is-you-proxy-1 15.55MiB / 5.772GiB pids 11
+this-is-you-app-1 137.3MiB / 2GiB pids 9
+this-is-you-net-1 540KiB / 16MiB pids 2
+this-is-you-reader-1 29.46MiB / 1.5GiB pids 2
+log bytes 102383, tracebacks 0, fictional names or filenames 0
+11M /srv/this-is-you/data
+3.8M /mnt/this-is-you/backup-drive
+login 204
+
+--- after a real reboot of the machine
+PASS the app came back by itself
+PASS the reader came back by itself
+PASS the proxy came back by itself
+PASS and reaches the app, so they share a network again
+PASS the reader passed its test again
+PASS the session survived
+PASS nothing is left waiting to be read
+PASS the database is intact
+PASS Back up now knows the drive is missing
+RESULT after-reboot: 9 passed, 0 failed
+
+--- backend tests, natively on this Linux machine
+Python 3.12.3
+Linux 6.8.0-147-generic aarch64
+510 passed, 6 skipped, 1 warning in 103.82s (0:01:43)

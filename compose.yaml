@@ -1,0 +1,127 @@
+# Production deployment. docs/deployment.md explains every choice and how to run it.
+#
+#   tailnet --HTTPS--> [proxy: tailscale serve] --127.0.0.1--> [app]  --socket + one open file--> [reader]
+#                        no published ports                     owns /data and backups            no network, no archive
+#
+# proxy and app share one network namespace, held by the net service, and the app listens only on its loopback. No port
+# is published to the LAN or the host. Tailscale Funnel, which would publish to the internet, is off in
+# deploy/tailscale-serve.json.
+name: this-is-you
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  init: true
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  # Does nothing but hold the network the other two share. If the proxy held it, a crash of the proxy would strand the
+  # app in a dead network while it still looked healthy. A real test found exactly that: see docs/reports/.
+  net:
+    <<: *hardening
+    image: this-is-you:${TIY_VERSION:-local}
+    pull_policy: never
+    command: ["sleep", "infinity"]
+    user: "65534:65534"
+    mem_limit: 16m
+    pids_limit: 4
+    stop_grace_period: 1s
+
+  proxy:
+    <<: *hardening
+    image: tailscale/tailscale@sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c
+    network_mode: service:net
+    user: "10003:10003"
+    environment:
+      TS_HOSTNAME: ${TIY_TAILNET_NAME:?Set TIY_TAILNET_NAME in .env}
+      TS_AUTHKEY: file:/run/secrets/ts_authkey
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true" # Needs no kernel device and no added capabilities.
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_SOCKET: /tmp/tailscaled.sock
+      TS_AUTH_ONCE: "true"
+    volumes:
+      - ${TIY_TAILSCALE_DIR:?Set TIY_TAILSCALE_DIR in .env}:/var/lib/tailscale
+      - ./deploy/tailscale-serve.json:/config/serve.json:ro
+    tmpfs: ["/tmp:size=16m,mode=1777,noexec,nosuid,nodev"]
+    secrets: [ts_authkey]
+    depends_on:
+      net: { condition: service_started }
+    stop_grace_period: 20s
+
+  app:
+    <<: *hardening
+    build: { context: ., pull: false }
+    image: this-is-you:${TIY_VERSION:-local}
+    command: ["python", "-m", "this_is_you"]
+    network_mode: service:net # Reachable only through the proxy. Nothing else shares this loopback.
+    user: "10001:10001"
+    group_add: ["10004"] # Shared with the reader, for its socket and nothing else.
+    environment:
+      THIS_IS_YOU_DATA_DIR: /data
+      THIS_IS_YOU_BACKUP_DIR: /mnt/backups/backup-drive
+      THIS_IS_YOU_PUBLIC_ORIGIN: ${TIY_PUBLIC_ORIGIN:?Set TIY_PUBLIC_ORIGIN in .env}
+      THIS_IS_YOU_WEB_DIR: /app/web
+      THIS_IS_YOU_READER_SOCKET: /run/reader/reader.sock
+      THIS_IS_YOU_HOST: 127.0.0.1
+      THIS_IS_YOU_PORT: "8000"
+    volumes:
+      - ${TIY_DATA_DIR:?Set TIY_DATA_DIR in .env}:/data
+      # The folder holding the drive's mount point, not the drive. Binding the drive itself would keep it visible here
+      # after it is unplugged, and backups would seem to work. See docs/reports/. This way it comes and goes with the host.
+      - type: bind
+        source: ${TIY_BACKUP_PARENT:?Set TIY_BACKUP_PARENT in .env}
+        target: /mnt/backups
+        bind: { propagation: rslave }
+      - reader-socket:/run/reader:ro
+    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
+    depends_on:
+      net: { condition: service_started }
+      reader: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-I", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/status', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    stop_grace_period: 20s
+    mem_limit: 2g
+    pids_limit: 128
+
+  reader:
+    <<: *hardening
+    image: this-is-you:${TIY_VERSION:-local}
+    pull_policy: never
+    depends_on: { }
+    command: ["python", "-I", "-m", "this_is_you.extraction.reader_service", "/run/reader/reader.sock"]
+    network_mode: none # Enforced by the kernel. The app refuses to read anything if this stops being true.
+    user: "10002:10002"
+    group_add: ["10004"]
+    # No archive and no backups are mounted here. It sees only the one open file it is handed.
+    volumes:
+      - reader-socket:/run/reader
+    healthcheck:
+      test: ["CMD", "python", "-I", "-c", "import socket; s = socket.socket(socket.AF_UNIX); s.connect('/run/reader/reader.sock')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 5s
+    mem_limit: 1536m
+    pids_limit: 32
+    cpus: 2
+
+volumes:
+  reader-socket:
+    driver_opts: # Memory only, and it holds nothing but the socket.
+      type: tmpfs
+      device: tmpfs
+      o: "size=1m,uid=10002,gid=10004,mode=2770,noexec,nosuid,nodev"
+
+secrets:
+  ts_authkey:
+    file: ${TIY_AUTHKEY_FILE:?Set TIY_AUTHKEY_FILE in .env}

@@ -221,6 +221,37 @@ describe('signing in', () => {
     await act(async () => { fireEvent.click(screen.getByText('Delete the report, keep the documents')); });
     expect(server.removeBatch).toHaveBeenCalledOnce();
   });
+  it('turns Back up now off until there is a key, and says how to set one', async () => {
+    const server = backendWith();
+    server.listBackups = vi.fn(async () => ({ location: '~/b', same_drive: true, key_configured: false, backups: [], running: null, last_result: null }));
+    const { store, container } = mount(server);
+    await act(async () => { await store.loadArchiveSafety(); });
+    expect((screen.getByText('Back up now') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.textContent).toContain('backup-key set');
+  });
+  it('asks for the passphrase to test an encrypted backup, and clears it', async () => {
+    const server = backendWith();
+    const entry = { name: 'this-is-you-backup-20260101T000000Z.tiyb', state: 'encrypted' as const, created_at: null, documents: null, bytes: 2048, last_check: { checked_at: '2026-01-01T00:00:00Z', ok: true, problems: [] } };
+    server.listBackups = vi.fn(async () => ({ location: '~/b', same_drive: false, key_configured: true, backups: [entry], running: null, last_result: null }));
+    server.checkBackup = vi.fn(async () => undefined);
+    const { store, container } = mount(server);
+    await act(async () => { await store.loadArchiveSafety(); });
+    expect(container.textContent).toContain('Encrypted, tested');
+    expect(container.textContent).toContain('different drive');
+    fireEvent.click(screen.getByText('Test restore'));
+    const field = container.querySelector('section[aria-label="Backups"] input[type=password]') as HTMLInputElement;
+    fireEvent.change(field, { target: { value: 'fictional backup passphrase' } });
+    await act(async () => { fireEvent.submit(field.closest('form')!); });
+    expect(server.checkBackup).toHaveBeenCalledWith(entry.name, 'fictional backup passphrase');
+    expect(container.querySelector('section[aria-label="Backups"] input[type=password]')).toBeNull();
+  });
+  it('says plainly when reading is stopped for want of a sandbox', async () => {
+    const server = backendWith();
+    server.getArchiveHealth = vi.fn(async () => ({ recovered: 0, set_aside: 0, missing: 0, reader_isolation: 'unavailable' as const }));
+    const { store, container } = mount(server);
+    await act(async () => { await store.loadArchiveSafety(); });
+    expect(container.textContent).toContain('Reading is stopped');
+  });
   it('shows what the archive found when it started, only when there is something to say', async () => {
     const server = backendWith();
     const { store, container } = mount(server);
@@ -228,7 +259,7 @@ describe('signing in', () => {
     expect(container.textContent).not.toContain('set-aside');
     server.getArchiveHealth = vi.fn(async () => ({ recovered: 2, set_aside: 1, missing: 3, reader_isolation: 'basic' as const }));
     await act(async () => { await store.loadArchiveSafety(); });
-    for (const text of ['2 files left by an interrupted import', 'set-aside', '3 originals', 'bubblewrap']) expect(container.textContent).toContain(text);
+    for (const text of ['2 files left by an interrupted import', 'set-aside', '3 originals', 'with no sandbox']) expect(container.textContent).toContain(text);
   });
 });
 
@@ -412,7 +443,7 @@ describe('backups', () => {
   const entry = (over = {}) => ({ name: 'this-is-you-backup-20261102T100000Z', state: 'complete', created_at: 't', documents: 3, bytes: 2048, last_check: null, ...over });
   const withBackups = (backups: unknown[], extra = {}) => {
     const server = backendWith();
-    server.listBackups = vi.fn(async () => ({ location: '/private/backups', same_drive: true, backups, running: null, last_result: null, ...extra })) as never;
+    server.listBackups = vi.fn(async () => ({ location: '/private/backups', same_drive: true, key_configured: true, backups, running: null, last_result: null, ...extra })) as never;
     return server;
   };
   it('shows only what a check has shown about each backup', async () => {
@@ -420,7 +451,7 @@ describe('backups', () => {
     const { store, container } = mount(server);
     await act(async () => { await store.loadArchiveSafety(); });
     for (const text of ['Not checked yet', 'Restore tested', 'Failed its last check', 'Did not finish, cannot be used']) expect(container.textContent).toContain(text);
-    expect(container.textContent).toContain('not encrypted');
+    expect(container.textContent).toContain('cannot open');
     expect(screen.getAllByRole('button', { name: 'Test restore' })).toHaveLength(3);
   });
   it('starts a backup, names its problem, and offers no restore over the archive from the browser', async () => {

@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -17,7 +19,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from this_is_you import auth, backup, backup_crypto
 from this_is_you.backup import BackupProblem, apply_prune, create_backup, create_encrypted_backup, plan_prune, restore_sealed, verify_backup, verify_sealed
-from this_is_you.config import Settings
+from this_is_you.config import Settings, UnsafeConfiguration
 from this_is_you.extraction import sandbox
 from this_is_you.extraction.runner import Limits, extract, worker_command
 from this_is_you.main import create_app
@@ -368,7 +370,7 @@ def test_with_no_working_sandbox_reading_still_works_and_it_says_so(tmp_path, mo
     sandbox.isolation.cache_clear()
     try:
         assert sandbox.isolation() == sandbox.BASIC
-        assert "no operating-system sandbox" in caplog.text
+        assert "did not pass its test" in caplog.text
         path = tmp_path / "a.pdf"
         path.write_bytes(pdfs.text_pdf(pdfs.LAB_REPORT))
         assert extract(path).status == "extracted"
@@ -532,6 +534,7 @@ def test_prune_leaves_replaced_archives_unless_asked(data_dir):
 def test_a_drive_that_is_not_connected_does_not_become_a_folder_here(data_dir, tmp_path):
     missing = tmp_path / "Volumes" / "Fictional Drive" / "Backups"
     client = client_for(data_dir, backups_dir_override=missing)
+    backup_crypto.save_key(backup_crypto.make_key(KEY), Settings(data_dir=data_dir).backup_key_path)
     assert client.post("/api/backups", headers=CLIENT_HEADERS).status_code == 202
     client.app.state.backups.wait()
     assert not missing.parent.exists()
@@ -600,7 +603,7 @@ def archive(data_dir):
 
 
 def _seal(data_dir: Path, tmp_path: Path) -> Path:
-    return create_encrypted_backup(Settings(data_dir=data_dir), tmp_path / "drive", KEY).path
+    return create_encrypted_backup(Settings(data_dir=data_dir), tmp_path / "drive", backup_crypto.make_key(KEY)).path
 
 
 def test_a_sealed_backup_hides_everything_and_restores_whole(archive, data_dir, tmp_path, fast_kdf):
@@ -625,9 +628,9 @@ def test_no_plain_copy_touches_the_destination_or_outlives_the_run(archive, data
     seen: list[list[str]] = []
     real = backup_crypto.seal_folder
 
-    def spy(folder, target, passphrase):
+    def spy(folder, target, key):
         seen.append([p.name for p in target.parent.iterdir()])
-        real(folder, target, passphrase)
+        return real(folder, target, key)
 
     monkeypatch.setattr(backup, "seal_folder", spy)
     sealed = _seal(data_dir, tmp_path)
@@ -636,7 +639,7 @@ def test_no_plain_copy_touches_the_destination_or_outlives_the_run(archive, data
 
 
 def test_a_crash_while_sealing_leaves_no_usable_or_plain_file(archive, data_dir, tmp_path, fast_kdf, monkeypatch):
-    def fail(folder, target, passphrase):
+    def fail(folder, target, key):
         target.write_bytes(b"partial")
         raise OSError(28, "No space left on device")
 
@@ -661,7 +664,7 @@ def _flip(raw: bytes, at: int) -> bytes:
 
 TAMPER = {
     "magic": lambda raw: _flip(raw, 0),
-    "header": lambda raw: _flip(raw, len(backup_crypto.MAGIC) + 18),
+    "header": lambda raw: _flip(raw, len(backup_crypto.MAGIC) + 60),
     "first chunk": lambda raw: _flip(raw, len(backup_crypto.MAGIC) + backup_crypto._HEADER.size + 40),
     "last byte": lambda raw: _flip(raw, len(raw) - 1),
     "cut short": lambda raw: raw[: len(raw) // 2],
@@ -687,7 +690,7 @@ def test_chunks_cannot_be_reordered(tmp_path, fast_kdf):
     folder.mkdir()
     (folder / "big.bin").write_bytes(os.urandom(3 * backup_crypto._CHUNK))
     sealed = tmp_path / "s.tiyb"
-    backup_crypto.seal_folder(folder, sealed, KEY)
+    backup_crypto.seal_folder(folder, sealed, backup_crypto.make_key(KEY))
     raw = sealed.read_bytes()
     start = len(backup_crypto.MAGIC) + backup_crypto._HEADER.size
     length = int.from_bytes(raw[start:start + 4], "big") + 4
@@ -699,7 +702,7 @@ def test_chunks_cannot_be_reordered(tmp_path, fast_kdf):
 
 def test_a_header_cannot_demand_unlimited_memory(tmp_path):
     sealed = tmp_path / "s.tiyb"
-    sealed.write_bytes(backup_crypto.MAGIC + backup_crypto._HEADER.pack(b"s" * 16, 40, 8, 1, b"p" * 7, 1024))
+    sealed.write_bytes(backup_crypto.MAGIC + backup_crypto._HEADER.pack(b"s" * 16, 40, 8, 1, b"r" * 32, b"e" * 32, b"p" * 7, 1024))
     with pytest.raises(backup_crypto.CannotOpen):
         backup_crypto.open_into(sealed, tmp_path / "out", KEY)
 
@@ -735,9 +738,11 @@ def test_the_command_line_refuses_a_short_passphrase(data_dir):
 def test_the_command_line_seals_checks_and_restores(archive, data_dir, tmp_path):
     drive = tmp_path / "drive"
     drive.mkdir()
-    answer = _cli(data_dir, "backup", "--encrypt", "--to", str(drive), stdin=KEY + "\n")
+    assert _cli(data_dir, "backup", "--to", str(drive)).returncode != 0, "no key yet, so no backup"
+    assert _cli(data_dir, "backup-key", "set", stdin=KEY + "\n").returncode == 0
+    answer = _cli(data_dir, "backup", "--to", str(drive))
     assert answer.returncode == 0, answer.stderr
-    sealed = next(drive.iterdir())
+    sealed = next(p for p in drive.iterdir() if p.name.endswith(".tiyb"))
     assert _cli(data_dir, "verify", str(sealed), stdin=KEY + "\n").returncode == 0
     wrong = _cli(data_dir, "verify", str(sealed), stdin="fictional wrong passphrase\n")
     assert wrong.returncode != 0 and "could not be opened" in wrong.stdout
@@ -749,7 +754,7 @@ def test_the_command_line_seals_checks_and_restores(archive, data_dir, tmp_path)
 def test_the_command_line_will_not_write_to_a_drive_that_is_not_connected(data_dir, tmp_path):
     client_for(data_dir)
     missing = tmp_path / "Fictional Drive" / "Backups"
-    answer = _cli(data_dir, "backup", "--to", str(missing))
+    answer = _cli(data_dir, "backup", "--plain", "--to", str(missing))
     assert answer.returncode != 0 and "connected" in answer.stderr and not missing.parent.exists()
 
 
@@ -764,7 +769,7 @@ def test_the_command_line_prunes_only_with_yes(data_dir):
 
 def test_doctor_reports_without_changing_anything_or_showing_secrets(anon, data_dir):
     answer = _cli(data_dir, "doctor")
-    assert answer.returncode == 0 and "Passphrase: set" in answer.stdout and "SAME DRIVE" in answer.stdout
+    assert answer.returncode == 0 and "Passphrase: set" in answer.stdout and "SAME DRIVE" in answer.stdout and "Backup key: NOT SET" in answer.stdout
     assert PASSPHRASE not in answer.stdout
 
 
@@ -772,3 +777,361 @@ def test_sign_out_everywhere_from_the_command_line(anon, data_dir):
     token = auth.create_session(anon.app.state.sessions)
     assert _cli(data_dir, "sign-out-everywhere").returncode == 0
     assert not auth.session_is_valid(anon.app.state.sessions, token)
+
+
+# ---- Encrypted by default, and this machine cannot open them
+
+def test_back_up_now_refuses_without_a_key_and_writes_nothing(client, data_dir):
+    assert client.get("/api/backups").json()["key_configured"] is False
+    assert client.post("/api/backups", headers=CLIENT_HEADERS).status_code == 202
+    client.app.state.backups.wait()
+    last = client.get("/api/backups").json()["last_result"]
+    assert last["ok"] is False and "backup-key set" in last["problems"][0]
+    assert not list(data_dir.with_name(data_dir.name + " Backups").glob("this-is-you-backup-*"))
+
+
+def test_back_up_now_seals_and_the_machine_holds_nothing_that_opens_it(archive, data_dir, fast_kdf):
+    backup_crypto.save_key(backup_crypto.make_key(KEY), Settings(data_dir=data_dir).backup_key_path)
+    assert archive.post("/api/backups", headers=CLIENT_HEADERS).status_code == 202
+    archive.app.state.backups.wait()
+    listing = archive.get("/api/backups").json()
+    assert listing["last_result"]["ok"] is True and listing["key_configured"] is True
+    entry = listing["backups"][0]
+    assert entry["state"] == "encrypted" and entry["last_check"]["ok"] is True and entry["name"].endswith(".tiyb")
+    stored = (data_dir / "backup-key.json").read_text()
+    assert KEY not in stored and "private" not in stored
+    sealed = data_dir.with_name(data_dir.name + " Backups") / entry["name"]
+    assert b"SQLite format" not in sealed.read_bytes()
+    assert not (data_dir / "backup-staging").exists()
+
+
+def test_a_web_test_restore_needs_the_passphrase_and_never_keeps_it(archive, data_dir, fast_kdf, caplog):
+    backup_crypto.save_key(backup_crypto.make_key(KEY), Settings(data_dir=data_dir).backup_key_path)
+    archive.post("/api/backups", headers=CLIENT_HEADERS)
+    archive.app.state.backups.wait()
+    name = archive.get("/api/backups").json()["backups"][0]["name"]
+    assert archive.post(f"/api/backups/{name}/check", json={"passphrase": "fictional wrong passphrase"}, headers=CLIENT_HEADERS).status_code == 202
+    archive.app.state.backups.wait()
+    assert archive.get("/api/backups").json()["backups"][0]["last_check"]["ok"] is False
+    assert archive.post(f"/api/backups/{name}/check", json={"passphrase": KEY}, headers=CLIENT_HEADERS).status_code == 202
+    archive.app.state.backups.wait()
+    assert archive.get("/api/backups").json()["backups"][0]["last_check"]["ok"] is True
+    on_disk = b"".join(p.read_bytes() for p in data_dir.rglob("*") if p.is_file())
+    assert KEY.encode() not in on_disk and KEY not in caplog.text
+
+
+def test_a_passphrase_can_be_replaced_and_old_backups_keep_their_own(archive, data_dir, tmp_path, fast_kdf):
+    first = _seal(data_dir, tmp_path)
+    second = create_encrypted_backup(Settings(data_dir=data_dir), tmp_path / "drive2", backup_crypto.make_key("another fictional passphrase")).path
+    assert verify_sealed(first, tmp_path / "s", KEY).ok and not verify_sealed(first, tmp_path / "s", "another fictional passphrase").ok
+    assert verify_sealed(second, tmp_path / "s", "another fictional passphrase").ok and not verify_sealed(second, tmp_path / "s", KEY).ok
+
+
+def test_short_backup_passphrases_are_refused(data_dir):
+    assert _cli(data_dir, "backup-key", "set", stdin="too short\n").returncode != 0
+    assert not (data_dir / "backup-key.json").exists()
+
+
+def test_a_plain_backup_is_only_by_asking_and_says_so(archive, data_dir, tmp_path):
+    answer = _cli(data_dir, "backup", "--plain", "--to", str(tmp_path / "plain"))
+    assert answer.returncode == 0 and "NOT encrypted" in answer.stdout
+
+
+# ---- Production: one HTTPS address, behind a proxy on the same network
+
+ORIGIN = "https://archive.fictional.ts.net"
+HOST = "archive.fictional.ts.net"
+
+
+def production(data_dir: Path, tmp_path: Path, signed_in: bool = True) -> TestClient:
+    web = tmp_path / "web"
+    (web / "assets").mkdir(parents=True, exist_ok=True)
+    (web / "index.html").write_text("<!doctype html><title>Fictional app</title>")
+    (web / "assets" / "app-abc.js").write_text("console.log('fictional')")
+    app = create_app(Settings(data_dir=data_dir, public_origin=ORIGIN, web_dir=web))
+    client = TestClient(app, base_url=f"https://{HOST}", client=("127.0.0.1", 50000))
+    auth.set_passphrase(app.state.sessions, PASSPHRASE)
+    if signed_in:
+        client.cookies.set(auth.SECURE_COOKIE, auth.create_session(app.state.sessions))
+    return client
+
+
+def test_production_signs_in_with_a_secure_host_only_cookie(data_dir, tmp_path):
+    client = production(data_dir, tmp_path, signed_in=False)
+    answer = client.post("/api/auth/login", json={"passphrase": PASSPHRASE}, headers={**CLIENT_HEADERS, "origin": ORIGIN})
+    assert answer.status_code == 204
+    cookie = answer.headers["set-cookie"]
+    assert cookie.startswith("__Host-tiy_session=") and "Secure" in cookie and "HttpOnly" in cookie and "SameSite=strict" in cookie and "Path=/" in cookie and "Domain" not in cookie
+    assert client.get("/api/documents").status_code == 200
+
+
+def test_production_ignores_the_development_cookie(data_dir, tmp_path):
+    client = production(data_dir, tmp_path, signed_in=False)
+    client.cookies.set(auth.COOKIE, auth.create_session(client.app.state.sessions))
+    assert client.get("/api/documents").status_code == 401
+
+
+@pytest.mark.parametrize("host", ["localhost", "127.0.0.1:8000", "other.fictional.ts.net", "archive.fictional.ts.net.evil.example", "archive.fictional.ts.net:8443", "192.168.1.20"])
+def test_production_refuses_every_other_name_even_when_signed_in(data_dir, tmp_path, host):
+    assert production(data_dir, tmp_path).get("/api/documents", headers={"host": host}).status_code == 403
+
+
+@pytest.mark.parametrize("host", [HOST, HOST + ":443", HOST.upper()])
+def test_production_accepts_its_own_name(data_dir, tmp_path, host):
+    assert production(data_dir, tmp_path).get("/api/documents", headers={"host": host}).status_code == 200
+
+
+@pytest.mark.parametrize("origin", ["http://archive.fictional.ts.net", "https://other.fictional.ts.net", "https://evil.example", "null", "http://127.0.0.1:5180"])
+def test_production_refuses_every_other_origin(data_dir, tmp_path, origin):
+    assert production(data_dir, tmp_path).post("/api/auth/logout", headers={**CLIENT_HEADERS, "origin": origin}).status_code == 403
+
+
+def test_production_csrf_checks_still_apply(data_dir, tmp_path):
+    client = production(data_dir, tmp_path)
+    assert client.post("/api/backups", headers={"origin": ORIGIN}).status_code == 403
+    assert client.get("/api/documents", headers={"sec-fetch-site": "same-site"}).status_code == 403
+
+
+def test_a_proxy_s_forwarded_headers_cannot_change_the_checks(data_dir, tmp_path):
+    client = production(data_dir, tmp_path)
+    forged = {"host": "evil.example", "x-forwarded-host": HOST, "x-forwarded-proto": "https", "x-forwarded-for": "127.0.0.1"}
+    assert client.get("/api/documents", headers=forged).status_code == 403
+
+
+def test_the_container_health_check_reaches_status_and_nothing_else(data_dir, tmp_path):
+    client = production(data_dir, tmp_path, signed_in=False)
+    assert client.get("/api/status", headers={"host": "127.0.0.1:8000"}).status_code == 200
+    assert client.get("/api/documents", headers={"host": "127.0.0.1:8000"}).status_code == 403
+    assert client.get("/", headers={"host": "127.0.0.1:8000"}).status_code == 403
+
+
+def test_production_serves_the_app_with_no_session_and_no_records(data_dir, tmp_path):
+    client = production(data_dir, tmp_path, signed_in=False)
+    page = client.get("/")
+    assert page.status_code == 200 and "Fictional app" in page.text
+    policy = page.headers["content-security-policy"]
+    assert "script-src 'self'" in policy and "unsafe-eval" not in policy and "frame-ancestors 'none'" in policy
+    assert page.headers["cache-control"] == "no-store" and "max-age" in page.headers["strict-transport-security"]
+    asset = client.get("/assets/app-abc.js")
+    assert asset.status_code == 200 and "immutable" in asset.headers["cache-control"]
+    assert client.get("/api/documents").status_code == 401
+
+
+@pytest.mark.parametrize("path", ["/assets/../index.html", "/assets/%2e%2e/%2e%2e/archive.sqlite3", "/assets/../../archive.sqlite3", "/archive.sqlite3", "/originals", "/assets"])
+def test_production_serves_nothing_outside_the_built_app(data_dir, tmp_path, path):
+    client = production(data_dir, tmp_path, signed_in=False)
+    answer = client.get(path)
+    assert b"SQLite" not in answer.content
+    assert answer.status_code in (401, 404)
+
+
+@pytest.mark.parametrize("origin", ["http://archive.example", "https://a b", "https://archive.example/path", "archive.example", "https://ARCHIVE.example"])
+def test_a_bad_public_address_stops_the_service_from_starting(data_dir, origin):
+    with pytest.raises(UnsafeConfiguration):
+        create_app(Settings(data_dir=data_dir, public_origin=origin))
+
+
+def test_production_requires_loopback_still(data_dir, tmp_path):
+    production(data_dir, tmp_path)
+    remote = TestClient(create_app(Settings(data_dir=data_dir, public_origin=ORIGIN)), base_url=f"https://{HOST}", client=("100.64.0.9", 50000))
+    assert remote.get("/api/status").status_code == 403
+
+
+# ---- A sandbox that production must have
+
+def _no_sandbox(monkeypatch, problem=("no sandbox tool",)):
+    monkeypatch.setattr(sandbox, "_self_test", lambda canary_dir: list(problem))
+
+
+@pytest.mark.parametrize("problem", ["no sandbox tool", "the sandbox would not start", "network", "reading the archive", "writing to the archive"])
+def test_without_a_working_sandbox_production_stores_but_never_reads(data_dir, tmp_path, monkeypatch, problem, caplog):
+    _no_sandbox(monkeypatch, [problem])
+    started: list = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: started.append(a) or (_ for _ in ()).throw(AssertionError("the reader ran")))
+    client = production(data_dir, tmp_path)
+    assert client.get("/api/backups/archive-health").json()["reader_isolation"] == "unavailable"
+    answer = upload(client, make_pdf("Fictional stored unread"), "a.pdf", origin=ORIGIN)
+    assert answer.status_code == 201
+    client.app.state.extraction.wait_idle()
+    assert started == []
+    document = client.get("/api/documents").json()["documents"][0]
+    assert document["extraction_status"] == "pending"
+    assert problem in caplog.text and "Reading is stopped" in caplog.text
+
+
+def test_the_reader_will_not_run_unsandboxed_even_if_something_asks(monkeypatch, tmp_path):
+    _no_sandbox(monkeypatch)
+    sandbox.configure(None, True)
+    try:
+        with pytest.raises(sandbox.SandboxRequired):
+            sandbox.wrap(["python"])
+    finally:
+        monkeypatch.undo()
+        sandbox.configure(None, False)
+
+
+def test_reading_resumes_after_a_fix_and_restart(data_dir, tmp_path, monkeypatch):
+    with monkeypatch.context() as patch:
+        _no_sandbox(patch)
+        client = production(data_dir, tmp_path)
+        upload(client, pdfs.text_pdf(pdfs.LAB_REPORT), "a.pdf", origin=ORIGIN)
+        client.app.state.extraction.wait_idle()
+    # "Fixed": whatever this test machine has, the reader may now run.
+    monkeypatch.setattr(sandbox, "_self_test", lambda canary_dir: [])
+    monkeypatch.setattr(sandbox, "_wrap", lambda command: command)
+    client = production(data_dir, tmp_path)
+    client.app.state.extraction.wait_idle()
+    assert client.get("/api/documents").json()["documents"][0]["extraction_status"] == "extracted"
+
+
+def test_a_leaking_sandbox_is_caught_by_the_self_test(monkeypatch, tmp_path):
+    # A "sandbox" that blocks nothing has to fail its test, or the test proves nothing.
+    monkeypatch.setattr(sandbox, "_wrap", lambda command: command)
+    problems = sandbox._self_test(tmp_path)
+    assert "reading the archive" in problems and "writing to the archive" in problems
+    assert "writing to its home" in problems
+
+
+@needs_sandbox
+def test_the_real_sandbox_passes_its_test(tmp_path):
+    assert sandbox._self_test(tmp_path) == []
+
+
+def test_development_can_also_insist_on_the_sandbox(data_dir, monkeypatch):
+    _no_sandbox(monkeypatch)
+    client = client_for(data_dir, require_sandbox=True)
+    assert client.get("/api/backups/archive-health").json()["reader_isolation"] == "unavailable"
+
+
+# ---- The reader as its own process, as it runs in its own container
+
+@pytest.fixture
+def reader():
+    # A Unix socket's path has a short length limit, which pytest's own temp folders can pass.
+    folder = tempfile.mkdtemp(dir="/tmp", prefix="tiy")
+    path = folder + "/r.sock"
+    process = subprocess.Popen([sys.executable, "-I", "-m", "this_is_you.extraction.reader_service", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(100):
+        if os.path.exists(path):
+            break
+        time.sleep(0.1)
+    yield path
+    process.terminate()
+    process.wait(10)
+    shutil.rmtree(folder)
+
+
+def test_a_document_is_read_through_the_socket_with_only_an_open_file(reader, tmp_path, monkeypatch):
+    path = tmp_path / "a.pdf"
+    path.write_bytes(pdfs.text_pdf(pdfs.LAB_REPORT))
+    monkeypatch.setattr(sandbox, "_reader_socket", reader)
+    result = extract(path)
+    assert result.status == "extracted" and result.lab_rows
+
+
+def test_the_reader_accepts_limits_and_a_date_but_never_a_command(reader, tmp_path):
+    from this_is_you.extraction.reader_service import client_exchange
+
+    marker = tmp_path / "ran"
+    limits = {"cpu_seconds": 1, "memory_bytes": 1, "max_pages": 1, "max_chars": 1}
+    for request in (
+        {"op": "run", "command": ["touch", str(marker)]},
+        {"op": "read", "command": ["touch", str(marker)], "limits": limits, "today": "2026-01-01", "wall_seconds": 1},
+        {"op": "read", "limits": {**limits, "command": ["touch", str(marker)]}, "today": "2026-01-01", "wall_seconds": 1},
+        {"op": "read", "limits": {**limits, "cpu_seconds": "1; touch x"}, "today": "2026-01-01", "wall_seconds": 1},
+        {"op": "read", "limits": limits, "today": "not a date", "wall_seconds": 1},
+    ):
+        code, _ = client_exchange(reader, request, None, 10)
+        assert code == 2 or code == 0 and "command" in request
+    assert not marker.exists()
+
+
+def test_a_bad_request_does_not_stop_the_reader(reader):
+    import socket as sockets
+
+    with sockets.socket(sockets.AF_UNIX) as connection:
+        connection.connect(reader)
+        connection.sendall(b"not json at all")
+        connection.recv(16)
+    from this_is_you.extraction.reader_service import client_exchange
+
+    assert client_exchange(reader, {"op": "nope"}, None, 10)[0] == 2
+
+
+def test_a_reader_that_cannot_be_reached_leaves_the_document_queued(data_dir, tmp_path, monkeypatch):
+    import this_is_you.main as main
+
+    monkeypatch.setattr(main, "READER_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr(sandbox, "READER_WAIT_SECONDS", 0)
+    client = client_for(data_dir, reader_socket=str(tmp_path / "nothing-here.sock"))
+    assert client.get("/api/backups/archive-health").json()["reader_isolation"] in ("basic", "unavailable")
+
+
+def test_without_the_reader_production_stores_and_waits_then_catches_up(data_dir, tmp_path, monkeypatch):
+    import this_is_you.main as main
+    from this_is_you import metadata
+
+    monkeypatch.setattr(main, "READER_RETRY_SECONDS", 0.05)
+    monkeypatch.setattr(sandbox, "_self_test", lambda canary_dir: [])
+    monkeypatch.setattr(sandbox, "_wrap", lambda command: command)
+    calls = []
+    real = metadata.extract
+
+    def flaky(path, limits):
+        calls.append(1)
+        if len(calls) < 3:
+            raise metadata.ReaderUnavailable
+        return real(path, limits)
+
+    monkeypatch.setattr(metadata, "extract", flaky)
+    client = client_for(data_dir)
+    upload(client, pdfs.text_pdf(pdfs.LAB_REPORT), "a.pdf")
+    for _ in range(100):
+        if client.get("/api/documents").json()["documents"][0]["extraction_status"] == "extracted":
+            break
+        time.sleep(0.05)
+    assert len(calls) == 3
+    assert client.get("/api/documents").json()["documents"][0]["extraction_status"] == "extracted"
+
+
+def test_the_reader_container_is_held_to_the_same_test(reader, tmp_path, monkeypatch):
+    # On a test machine this reader is not in a container, so it can reach the file and the test has to say so.
+    sandbox.configure(tmp_path, True, reader)
+    assert "reading the archive" in sandbox._self_test(tmp_path)
+    assert sandbox.isolation() == sandbox.UNAVAILABLE
+
+
+def test_production_will_not_back_up_to_an_empty_mount_point(data_dir, tmp_path, monkeypatch):
+    mount_point = tmp_path / "mnt"
+    mount_point.mkdir()
+    web = tmp_path / "web"
+    (web / "assets").mkdir(parents=True)
+    (web / "index.html").write_text("x")
+    app = create_app(Settings(data_dir=data_dir, public_origin=ORIGIN, web_dir=web, backups_dir_override=mount_point))
+    client = TestClient(app, base_url=f"https://{HOST}", client=("127.0.0.1", 50000))
+    client.cookies.set(auth.SECURE_COOKIE, auth.create_session(app.state.sessions))
+    backup_crypto.save_key(backup_crypto.make_key(KEY), app.state.settings.backup_key_path)
+    monkeypatch.setattr(backup_crypto, "_LOG2_N", 12)
+    assert client.post("/api/backups", headers=CLIENT_HEADERS).status_code == 202
+    app.state.backups.wait()
+    last = client.get("/api/backups").json()["last_result"]
+    assert last["ok"] is False and "not connected" in last["problems"][0] and list(mount_point.iterdir()) == []
+    (mount_point / backup.DRIVE_MARKER).touch()
+    client.post("/api/backups", headers=CLIENT_HEADERS)
+    app.state.backups.wait()
+    assert client.get("/api/backups").json()["last_result"]["ok"] is True
+
+
+def test_the_reader_rebuilds_a_socket_that_was_replaced(reader):
+    from this_is_you.extraction.reader_service import client_exchange
+
+    os.unlink(reader)
+    with socket.socket(socket.AF_UNIX) as planted:
+        planted.bind(reader)
+    for _ in range(80):
+        try:
+            assert client_exchange(reader, {"op": "nope"}, None, 2)[0] == 2
+            return
+        except OSError:
+            time.sleep(0.25)
+    raise AssertionError("the reader did not rebuild its socket")

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .documents import utc_now
 from .extraction import METHOD
-from .extraction.runner import ExtractionResult, Limits, extract
+from .extraction.runner import ReaderUnavailable, ExtractionResult, Limits, extract
 from .observations import add_extracted_rows, unresolved_count
 from .models import (
     Confidence,
@@ -71,7 +71,13 @@ def process_document(sessions: sessionmaker[Session], store: OriginalStore, limi
         key = document.storage_key
         session.commit()
     path = store.path_for(key)
-    result = extract(path, limits) if path.is_file() else ExtractionResult("failed")
+    try:
+        result = extract(path, limits) if path.is_file() else ExtractionResult("failed")
+    except ReaderUnavailable:
+        with sessions() as session:
+            session.get(Document, document_id).extraction_status = ExtractionStatus.PENDING
+            session.commit()
+        raise
     with sessions() as session:
         document = session.get(Document, document_id)
         assert document is not None

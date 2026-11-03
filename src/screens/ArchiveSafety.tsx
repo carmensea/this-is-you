@@ -116,12 +116,50 @@ export function IdentitySection() {
 }
 
 function backupStatus(b: BackupEntry) {
-  if (b.state === 'encrypted') return { text: 'Encrypted', color: C.green };
+  if (b.state === 'encrypted') {
+    if (!b.last_check) return { text: 'Encrypted, not checked yet', color: C.amber };
+    if (!b.last_check.ok) return { text: 'Encrypted, failed its last check', color: C.rust };
+    return { text: `Encrypted, tested ${fShort(b.last_check.checked_at.slice(0, 10))}`, color: C.green };
+  }
   if (b.state === 'incomplete') return { text: 'Did not finish, cannot be used', color: C.rust };
   if (b.state === 'damaged') return { text: 'Damaged, cannot be used', color: C.rust };
   if (!b.last_check) return { text: 'Not checked yet', color: C.amber };
   if (!b.last_check.ok) return { text: 'Failed its last check', color: C.rust };
   return { text: `Restore tested ${fShort(b.last_check.checked_at.slice(0, 10))}`, color: C.green };
+}
+
+/** The only time the passphrase comes near this machine: sent for this one test, used in memory and not kept. */
+function TestSealed({ name, disabled }: { name: string; disabled: boolean }) {
+  const store = useStore();
+  const [passphrase, setPassphrase] = useState<string | null>(null);
+  if (passphrase === null) {
+    return (
+      <button onClick={() => setPassphrase('')} disabled={disabled} style={s.link12}>
+        Test restore
+      </button>
+    );
+  }
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void store.checkBackup(name, passphrase);
+        setPassphrase(null);
+      }}
+      style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'baseline', flexBasis: '100%' }}
+    >
+      <label style={{ ...s.muted115, flex: '1 1 240px' }}>
+        Backup passphrase, used only for this test
+        <input type="password" autoComplete="off" autoFocus value={passphrase} onChange={(e) => setPassphrase(e.target.value)} style={inputStyle} />
+      </label>
+      <button type="submit" disabled={!passphrase} style={s.link12}>
+        Test restore
+      </button>
+      <button type="button" onClick={() => setPassphrase(null)} style={s.link12}>
+        Cancel
+      </button>
+    </form>
+  );
 }
 
 /** Writes and tests backups. Restoring over an archive is on the command line, with the service stopped. */
@@ -136,7 +174,7 @@ export function BackupsSection() {
         <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 26, margin: 0 }}>Backups</h2>
         <button
           onClick={store.startBackup}
-          disabled={!backups || !!running}
+          disabled={!backups?.key_configured || !!running}
           style={{ background: C.ink, color: C.paper, padding: '6px 12px', fontSize: 13, fontWeight: 500 }}
         >
           Back up now
@@ -144,10 +182,15 @@ export function BackupsSection() {
       </div>
       <p style={{ margin: '12px 0', fontSize: 13, lineHeight: 1.5, color: C.ink2, maxWidth: 820 }}>
         A backup holds the database, every original file, your decisions and correction history, and a manifest of
-        hashes. Each one is restored into a temporary folder and checked before it is reported as good. Backups made
-        here are not encrypted, so keep them somewhere private.{' '}
-        {backups?.same_drive ? 'They are on the same drive as your archive, so losing that drive loses both. Copy them elsewhere, or set up another drive below.' : 'They are on a different drive from your archive.'}
+        hashes. It is encrypted, and tested before it is reported as good. This machine can write backups but cannot open
+        them: only your backup passphrase can, and it is not stored here. Lose it and those backups are gone for good.{' '}
+        {backups?.same_drive ? 'They are on the same drive as your archive, so losing that drive loses both. Keep them on another drive.' : 'They are on a different drive from your archive.'}
       </p>
+      {backups && !backups.key_configured && (
+        <p role="status" style={{ fontSize: 13, color: C.rust, margin: '0 0 8px', maxWidth: 820 }}>
+          Back up now is off until you choose a backup passphrase. On the computer that holds the archive, run: npm run backend -- backup-key set
+        </p>
+      )}
       {backups && <p style={{ margin: '0 0 8px', fontFamily: MONO, fontSize: 12, overflowWrap: 'anywhere', color: C.ink2 }}>{backups.location}</p>}
       {running && (
         <p role="status" style={{ fontFamily: MONO, fontSize: 11.5, color: C.muted, margin: '0 0 8px' }}>
@@ -181,7 +224,7 @@ export function BackupsSection() {
                 Test restore
               </button>
             ) : b.state === 'encrypted' ? (
-              <span style={s.muted115}>Test it with the verify command below</span>
+              <TestSealed name={b.name} disabled={!!running} />
             ) : (
               <span style={s.muted115}>Cleared by the next backup</span>
             )}
@@ -193,7 +236,7 @@ export function BackupsSection() {
         To restore: stop the service, then npm run backend -- restore BACKUP --to FOLDER. A folder that holds files is
         replaced only after you type its name, and it is moved aside, not deleted.
         <br />
-        For an encrypted copy on another drive: npm run backend -- backup --encrypt --to FOLDER, then verify BACKUP to test it.
+        To write one elsewhere: npm run backend -- backup --to FOLDER. An unencrypted copy needs --plain, and anyone who can read it can read every record.
       </p>
     </section>
   );
@@ -207,7 +250,8 @@ export function AccessSection() {
     health?.recovered ? `${plural(health.recovered, 'file')} left by an interrupted import came back as documents named Recovered file. Importing the same file again restores its name.` : null,
     health?.set_aside ? `${plural(health.set_aside, 'file')} in the originals folder did not match their names and were moved to set-aside in the archive folder. Nothing was deleted.` : null,
     health?.missing ? `${plural(health.missing, 'original')} recorded in the archive could not be found on disk. Restore from a backup if you need them.` : null,
-    health?.reader_isolation === 'basic' ? 'The PDF reader is running with limits only, without an operating-system sandbox. On Linux, install bubblewrap.' : null,
+    health?.reader_isolation === 'unavailable' ? 'Reading is stopped: the PDF reader has no working sandbox here. New files are stored unread, and are read after this is fixed and the service restarts. Run doctor for details.' : null,
+    health?.reader_isolation === 'basic' ? 'The PDF reader is running with limits only, with no sandbox. That suits trying this out with fictional files. A production deployment runs it in its own container.' : null,
   ].filter(Boolean);
   return (
     <section aria-label="Sign-in" style={{ marginTop: 40 }}>

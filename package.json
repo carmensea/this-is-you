@@ -17,7 +17,8 @@
     "perf": "node tools/perf/run.mjs",
     "perf:compare": "node tools/perf/compare.mjs",
     "readiness": "node tools/readiness/run.mjs",
-    "readiness:dev": "node tools/readiness/devflow.mjs"
+    "readiness:dev": "node tools/readiness/devflow.mjs",
+    "deploy:https-flow": "node tools/deploy/https-flow.mjs"
   },
   "dependencies": {
     "@fontsource-variable/newsreader": "^5.3.0",

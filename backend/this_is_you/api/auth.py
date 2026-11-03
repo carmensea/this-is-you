@@ -16,8 +16,13 @@ class LoginBody(BaseModel):
     passphrase: str = Field(max_length=auth.MAX_PASSPHRASE * 4)
 
 
-def _clear_cookie(response: Response) -> None:
-    response.delete_cookie(auth.COOKIE, path="/", httponly=True, samesite="strict")
+def _cookie(request: Request) -> dict:
+    production = request.app.state.settings.production
+    return {"key": auth.SECURE_COOKIE if production else auth.COOKIE, "path": "/", "httponly": True, "samesite": "strict", "secure": production}
+
+
+def _clear_cookie(request: Request, response: Response) -> None:
+    response.delete_cookie(**_cookie(request))
 
 
 @router.post("/login", status_code=204)
@@ -31,17 +36,16 @@ async def login(request: Request, response: Response) -> None:
     if not await run_in_threadpool(state.login_throttle.attempt, state.sessions, body.passphrase):
         raise UploadRejected(401, "wrong_passphrase", "That passphrase is not right.")
     token = await run_in_threadpool(auth.create_session, state.sessions)
-    # shortcut: no Secure flag, because plain http on 127.0.0.1 is the only way in today. The remote access milestone must add it.
-    response.set_cookie(auth.COOKIE, token, max_age=auth.ABSOLUTE_SECONDS, path="/", httponly=True, samesite="strict")
+    response.set_cookie(value=token, max_age=auth.ABSOLUTE_SECONDS, **_cookie(request))
 
 
 @router.post("/logout", status_code=204)
 def logout(request: Request, response: Response) -> None:
-    auth.end_session(request.app.state.sessions, request.cookies.get(auth.COOKIE))
-    _clear_cookie(response)
+    auth.end_session(request.app.state.sessions, request.cookies.get(_cookie(request)["key"]))
+    _clear_cookie(request, response)
 
 
 @router.post("/logout-everywhere", status_code=204)
 def logout_everywhere(request: Request, response: Response) -> None:
     auth.end_all_sessions(request.app.state.sessions)
-    _clear_cookie(response)
+    _clear_cookie(request, response)

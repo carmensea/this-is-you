@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from this_is_you import auth
 from this_is_you.config import Settings
+from this_is_you.extraction import sandbox
 from this_is_you.main import create_app
 
 CLIENT_HEADERS = {"x-this-is-you-client": "1"}
@@ -42,6 +43,12 @@ def client_for(data_dir: Path, **settings) -> TestClient:
 def upload(client: TestClient, body: bytes, name: str = "report.pdf", **overrides):
     headers = {**CLIENT_HEADERS, "content-type": "application/pdf", "x-original-filename": name, **overrides}
     return client.post("/api/documents", content=body, headers=headers)
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_as_in_development():
+    """Production settings in one test must not carry over to the next."""
+    sandbox.configure(None, False)
 
 
 @pytest.fixture

@@ -395,9 +395,19 @@ try {
   check('recovery changed no data', (await api('/api/documents')).documents.length === documents.length && (await api('/api/observations')).observations.length === obsCount);
 
   section('Backups');
+  await page.reload();
+  await page.getByRole('heading', { name: 'Backups' }).waitFor();
+  check('Back up now is off until there is a backup key', await page.getByRole('button', { name: 'Back up now' }).isDisabled());
+  const BACKUP_KEY = 'fictional backup passphrase';
+  check('setting the backup key works', cliWith(`${BACKUP_KEY}\n`, 'backup-key', 'set').status === 0);
+  check('the machine does not hold what opens backups', !fs.readFileSync(path.join(DATA, 'backup-key.json'), 'utf8').includes(BACKUP_KEY));
+  await page.reload();
   await page.getByRole('button', { name: 'Back up now' }).click();
-  await page.getByText('Restore tested').first().waitFor({ timeout: 600000 });
-  check('a backup from the browser is tested before it is called good', true);
+  await page.getByText(/Encrypted, tested/).first().waitFor({ timeout: 600000 });
+  check('a backup from the browser is encrypted, and tested before it is called good', fs.readdirSync(BACKUPS).some((n) => n.endsWith('.tiyb')));
+  // The checks on damage below look inside a backup, so they need a plain one, which has to be asked for.
+  const plainRun = cli('backup', '--plain');
+  check('a plain backup has to be asked for, and says what it is', plainRun.status === 0 && plainRun.stdout.includes('NOT encrypted'), plainRun.stderr.trim());
   const good = (await api('/api/backups')).backups.find((b) => b.state === 'complete');
   check('the backup lists every document', good.documents === documents.length, good.documents);
   const goodPath = path.join(BACKUPS, good.name);
@@ -405,20 +415,21 @@ try {
   check('the backup folder is private', (fs.statSync(goodPath).mode & 0o777) === 0o700);
 
   section('A crash in the middle of a backup');
-  // A small archive backs up in a moment, so the crash is timed from the start of the job.
-  let incompleteSeen = false;
-  for (const delay of [60, 120, 30, 200, 15, 300, 500]) {
-    const started = await post('/api/backups');
-    if (started.status !== 202) throw new Error(`backup did not start: ${started.status}`);
-    await sleep(delay);
-    await crash();
-    incompleteSeen = fs.readdirSync(BACKUPS).some((n) => n.endsWith('.incomplete'));
-    await startService();
-    console.log(`service killed ${delay} ms into a backup: ${incompleteSeen ? 'left an unfinished folder' : 'already finished'}`);
-    if (incompleteSeen) break;
-    await until('the job to settle', async () => !(await api('/api/backups')).running, 60000, 50);
-  }
-  check('a crash partway through a backup was produced', incompleteSeen);
+  const STAGING = path.join(DATA, 'backup-staging');
+  const sealedBefore = fs.readdirSync(BACKUPS).filter((n) => n.endsWith('.tiyb')).length;
+  const startedBackup = await post('/api/backups');
+  if (startedBackup.status !== 202) throw new Error(`backup did not start: ${startedBackup.status}`);
+  await until('the plain working copy to appear', () => fs.existsSync(STAGING), 30000, 2);
+  await crash();
+  await startService();
+  check('a crash while building an encrypted backup leaves no plain copy after the next start', !fs.existsSync(STAGING));
+  check('and no file that could pass as a backup', fs.readdirSync(BACKUPS).filter((n) => n.endsWith('.tiyb')).length === sealedBefore);
+  // A plain backup builds its folder where it will stay, so this is the one that can leave an unfinished folder there.
+  const plainCrash = spawn(PY, ['-m', 'this_is_you', 'backup', '--plain'], { cwd: REPO, env: serviceEnv(DATA, API), stdio: 'ignore' });
+  await until('the unfinished folder to appear', () => fs.readdirSync(BACKUPS).some((n) => n.endsWith('.incomplete')), 60000, 2);
+  plainCrash.kill('SIGKILL');
+  await new Promise((r) => plainCrash.on('exit', r));
+  check('a crash partway through a backup was produced', fs.readdirSync(BACKUPS).some((n) => n.endsWith('.incomplete')));
   const crashed = (await api('/api/backups')).backups.find((b) => b.state === 'incomplete');
   check('an interrupted backup is listed as unusable', !!crashed);
   const crashedPath = path.join(BACKUPS, crashed.name);
@@ -591,8 +602,7 @@ try {
   section('Encrypted backups');
   const drive = path.join(root, 'Fictional Drive');
   fs.mkdirSync(drive);
-  const BACKUP_KEY = 'fictional backup passphrase';
-  const sealedRun = cliWith(`${BACKUP_KEY}\n`, 'backup', '--encrypt', '--to', drive);
+  const sealedRun = cli('backup', '--to', drive);
   check('an encrypted backup is written and tested', sealedRun.status === 0, sealedRun.stderr.trim().slice(0, 120));
   const sealedName = fs.readdirSync(drive).find((n) => n.endsWith('.tiyb'));
   const sealedPath = path.join(drive, sealedName);
@@ -617,8 +627,7 @@ try {
   const restoredDb = execFileSync(PY, ['-I', '-c', 'import sqlite3,sys;c=sqlite3.connect(sys.argv[1]);print(c.execute("select count(*) from documents").fetchone()[0],c.execute("select count(*) from auth_credential").fetchone()[0],c.execute("select count(*) from auth_sessions").fetchone()[0],c.execute("pragma foreign_key_check").fetchone())', path.join(sealedRestored, 'archive.sqlite3')], { encoding: 'utf8' }).trim();
   check('it holds every document and no sign-in details', restoredDb === `${(await api('/api/documents')).documents.length} 0 0 None`, restoredDb);
   check('a backup to a drive that is not connected is refused', cli('backup', '--to', path.join(root, 'Missing Drive', 'Backups')).status !== 0 && !fs.existsSync(path.join(root, 'Missing Drive')));
-  const killMid = spawn(PY, ['-m', 'this_is_you', 'backup', '--encrypt', '--to', drive], { cwd: REPO, env: serviceEnv(DATA, API), stdio: ['pipe', 'ignore', 'ignore'] });
-  killMid.stdin.end(`${BACKUP_KEY}\n`);
+  const killMid = spawn(PY, ['-m', 'this_is_you', 'backup', '--to', drive], { cwd: REPO, env: serviceEnv(DATA, API), stdio: 'ignore' });
   await sleep(1200);
   killMid.kill('SIGKILL');
   await new Promise((r) => killMid.on('exit', r));

@@ -23,6 +23,42 @@ __pycache__
 *.db-shm
 /data
 /archive
+*.sqlite-*
+*.sqlite3-*
+*.sqlite.*
+*.sqlite3.*
+# Backups, encrypted or not, and anything else the archive folder holds.
+*.tiyb
+*.tiyb.*
+this-is-you-backup-*
+*.replaced-*
+backup-key.json
+service.lock
+originals/
+incoming/
+set-aside/
+backup-staging/
+# Documents. Test fixtures are built while tests run, so none is ever tracked.
+*.pdf
+*.heic
+*.tif
+*.tiff
+*.dcm
+*.hl7
+*.ccd
+*.ccda
+*.docx
+*.xlsx
+# Credentials.
+secrets/
+ts_authkey
+*.pem
+*.key
+*.p12
+*.pfx
+*.kdbx
+id_rsa
+id_ed25519
 
 # OS and editors
 .DS_Store
