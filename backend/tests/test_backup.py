@@ -65,7 +65,7 @@ def test_a_backup_holds_everything_and_passes_its_check(data_dir, tmp_path):
     check = verify_backup(result.path)
     assert check.ok, check.problems
     manifest = check.manifest
-    assert manifest["format_version"] == backup.FORMAT_VERSION and manifest["schema_revision"] == "0005"
+    assert manifest["format_version"] == backup.FORMAT_VERSION and manifest["schema_revision"] == "0006"
     assert manifest["counts"]["documents"] == 3 and manifest["counts"]["lab_observation_revisions"] >= 3 and manifest["counts"]["metadata_decisions"] == 1 and manifest["counts"]["identity_profile"] == 1
     assert {f["path"] for f in manifest["files"]} >= {"archive.sqlite3"}
     assert stat.S_IMODE(result.path.stat().st_mode) == 0o700

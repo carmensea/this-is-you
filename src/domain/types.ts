@@ -52,6 +52,7 @@ export interface ObservationRevision {
   action: string;
   values: Record<string, unknown>;
   occurred_at: string;
+  review_group_id?: string | null;
 }
 
 /** One laboratory result as the archive stores it, with every date kept apart. */
@@ -91,6 +92,13 @@ export interface LabObservation {
   original: Record<string, unknown>;
   possible_duplicates: string[];
   revisions: ObservationRevision[];
+  /** Rises with every change. A group approval names the version it was shown, and is refused if it has moved on. */
+  version?: number;
+  review_group?: string | null;
+  review_group_label?: string | null;
+  group_eligible?: boolean;
+  group_reasons?: string[];
+  approved_group_id?: string | null;
 }
 
 export interface MethodChange {

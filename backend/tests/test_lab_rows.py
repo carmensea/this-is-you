@@ -95,10 +95,19 @@ def test_rows_before_the_first_of_several_dates_stay_unknown():
     assert row.collected is None
 
 
-def test_ambiguous_collection_date_is_flagged():
-    row = rows(pdfs.AMBIGUOUS_ROWS)[0]
-    assert row.collected == "2020-03-11"
-    assert any("2020-11-03" in i for i in row.issues) and row.confidence == "low"
+def test_a_numeric_collection_date_is_read_month_first_with_no_doubt():
+    row = rows(["Collected: 03/11/2020", "Component Your Value Standard Range Flag", "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL"])[0]
+    assert (row.collected, row.confidence, row.issues) == ("2020-03-11", "high", [])
+
+
+def test_a_numeric_date_only_one_way_round_is_still_understood():
+    row = rows(["Collected: 28/03/2020", "Component Your Value Standard Range Flag", "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL"])[0]
+    assert (row.collected, row.confidence, row.issues) == ("2020-03-28", "high", [])
+
+
+def test_a_two_digit_year_still_gets_a_warning():
+    row = rows(["Collected: 03/11/20", "Component Your Value Standard Range Flag", "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL"])[0]
+    assert row.confidence == "low" and any("two-digit" in i for i in row.issues)
 
 
 def test_service_date_is_used_only_with_a_warning():

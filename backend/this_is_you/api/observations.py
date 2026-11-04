@@ -28,13 +28,22 @@ class CorrectionBody(BaseModel):
     fields: dict
 
 
-class BatchBody(BaseModel):
-    ids: list[str] = Field(min_length=1, max_length=500)
+class GroupRow(BaseModel):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    version: int
+
+
+class ApproveGroupBody(BaseModel):
+    document_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    group: str = Field(max_length=80)
+    collected_on: str | None = Field(default=None, max_length=10)
+    items: list[GroupRow] = Field(min_length=1, max_length=500)
 
 
 def _one(request: Request, observation_id: str) -> ObservationOut:
     sessions = request.app.state.sessions
-    return ObservationOut.of(service.get_observation(sessions, observation_id), service.possible_duplicates(service.list_observations(sessions)))
+    all_rows = service.list_observations(sessions)
+    return ObservationOut.of(service.get_observation(sessions, observation_id), service.possible_duplicates(all_rows), service.review_groups(all_rows))
 
 
 @router.get("/lab-tests", response_model=list[LabTestOut])
@@ -46,7 +55,8 @@ def lab_tests() -> list[LabTestOut]:
 def list_all(request: Request) -> ObservationList:
     all_rows = service.list_observations(request.app.state.sessions)
     duplicates = service.possible_duplicates(all_rows)
-    return ObservationList(observations=[ObservationOut.of(o, duplicates) for o in all_rows])
+    groups = service.review_groups(all_rows)
+    return ObservationList(observations=[ObservationOut.of(o, duplicates, groups) for o in all_rows])
 
 
 @router.post("/observations", response_model=ObservationOut, status_code=201)
@@ -68,12 +78,19 @@ async def correct(request: Request, observation_id: ObservationId) -> Observatio
     return await run_in_threadpool(_one, request, observation_id)
 
 
-@router.post("/observations/verify", response_model=ObservationList)
-async def verify_batch(request: Request) -> ObservationList:
-    """Explicit approval of the listed results. This is the only way an extracted result is published."""
-    body = await read_json(request, BatchBody)
-    await run_in_threadpool(service.set_status, request.app.state.sessions, body.ids, RevisionAction.VERIFIED)
+@router.post("/observations/approve-group", response_model=ObservationList)
+async def approve_group(request: Request) -> ObservationList:
+    """A person approving the exact set of results they were shown. Every row and its version has to still match, or nothing happens."""
+    body = await read_json(request, ApproveGroupBody, 256 * 1024)
+    items = [service.GroupItem(row.id, row.version) for row in body.items]
+    await run_in_threadpool(service.approve_group, request.app.state.sessions, body.document_id, body.group, body.collected_on, items)
     return await run_in_threadpool(list_all, request)
+
+
+@router.post("/observations/group-approvals/{group_id}/undo", response_model=ObservationList)
+def undo_group(request: Request, group_id: ObservationId) -> ObservationList:
+    service.undo_group(request.app.state.sessions, group_id)
+    return list_all(request)
 
 
 async def _transition(request: Request, observation_id: str, action: RevisionAction) -> ObservationOut:

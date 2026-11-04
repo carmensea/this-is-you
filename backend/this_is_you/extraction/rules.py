@@ -113,7 +113,7 @@ _NOT_SERVICE = re.compile(r"\b(birth|dob|born|printed|faxed?|expires?|reported|r
 @dataclass(frozen=True)
 class FoundDate:
     iso: str
-    ambiguous: str | None  # The other reading, when day and month could be swapped
+    ambiguous: str | None  # The day-first reading. Dates are read month first, and only the identity check looks at this.
     two_digit_year: bool
     start: int
 
@@ -152,9 +152,8 @@ def find_dates(text: str, today: date) -> list[FoundDate]:
 
 
 def _date_proposal(found: FoundDate, line: Line, confidence: str, reason: str) -> Proposal:
-    if found.ambiguous:
-        confidence, reason = LOW, reason + f" The numbers could be read two ways: {found.iso} or {found.ambiguous}."
-    elif found.two_digit_year:
+    # Numeric dates are month first. That is a rule of this archive, so it is not a doubt.
+    if found.two_digit_year:
         confidence, reason = LOW, reason + " The year is written with two digits."
     return Proposal("service_date", found.iso, confidence, reason, line.page, line.text[:MAX_SNIPPET])
 

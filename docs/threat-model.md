@@ -87,6 +87,8 @@ Assumes the parser can be subverted by a crafted file.
 
 ## 4. Known limits within the defended cases
 
+0. **Originals are drawn in the browser by pdf.js.** This is what makes the magnifier possible. It runs in a worker on the app's own origin, so a flaw in pdf.js that a crafted PDF could reach would run with the signed-in session, which the browser's own PDF viewer would not. The content policy still forbids eval and every outside address, the version is pinned, and only your own uploads are ever opened. Keep it updated.
+
 1. **A signed-in device is fully trusted.** There is one person and one role. A lost, unlocked phone with a live session reads everything until the session ends or you sign out everywhere, which needs another device or the command line.
 2. **Passphrase strength is on you.** 12 characters is the minimum, and scrypt slows guessing but cannot save a weak one. There is no second factor.
 3. **Guessing can delay you.** The limit is one shared counter, so someone guessing can delay your own sign-in by up to 5 minutes at a time. It resets on restart.

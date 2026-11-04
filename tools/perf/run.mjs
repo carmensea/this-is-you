@@ -337,9 +337,9 @@ async function pdfPreview(browser, archive) {
       setTimeout(() => reject(new Error(`${name}: file not requested within 60 s`)), 60000).unref();
     });
     await row.click();
-    await page.locator('iframe[title^="Original file"]').scrollIntoViewIfNeeded();
+    await page.locator('[aria-label^="Original file"] canvas').scrollIntoViewIfNeeded();
     await pdf;
-    await page.locator('iframe[title^="Original file"]').waitFor();
+    await page.locator('[aria-label^="Original file"] canvas').waitFor();
     // The page must stay responsive while the viewer works.
     const frame = await page.evaluate(() => new Promise((r) => { const t = performance.now(); requestAnimationFrame(() => r(performance.now() - t)); }));
     times.push({ loaded: Date.now() - start, frame: Math.round(frame), longest: await page.evaluate(() => Math.max(0, ...window.__lt)) });

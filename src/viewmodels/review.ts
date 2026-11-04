@@ -3,7 +3,7 @@ import { fLong, fShort } from '../domain/dates';
 import { plural } from '../domain/format';
 import { DCATL, DCATS } from '../domain/vocabulary';
 import { EXTRACTION_LABEL, VERIFICATION_LABEL, displayValue } from '../domain/documentReview';
-import type { DocumentReview, MetadataFieldKey } from '../domain/types';
+import type { DocumentReview, LabObservation, MetadataFieldKey } from '../domain/types';
 import type { SegmentItem } from '../components/controls';
 import type { ObservationFields } from '../components/ObservationForm';
 import { C } from '../theme';
@@ -16,6 +16,8 @@ type Item = { status: string; conf: string; edited: boolean };
 function realLineStatus(real: DocumentReview, id: string): string {
   const o = real.observations.find((x) => x.id === id);
   if (!o) return '';
+  if (o.verification_status === 'verified' && o.approved_group_id)
+    return `Accepted by you as part of a group on ${fShort(o.revisions[o.revisions.length - 1].occurred_at.slice(0, 10))}. Shown in Biomarkers if it has a collection date and an exact number.`;
   if (o.verification_status === 'verified')
     return 'Accepted by you. Shown in Biomarkers if it has a collection date and an exact number.';
   if (o.verification_status === 'rejected') return 'Rejected. Not shown anywhere; still visible in the original.';
@@ -51,6 +53,9 @@ function lineExtras(store: AppStore, real: DocumentReview | undefined, id: strin
           : '',
     evidencePage: o?.source_page ?? 0,
     onShowPage: () => store.setState({ rvSourcePage: o?.source_page ?? null }),
+    // Why this one is here rather than in a table, unless its doubts already say.
+    groupNote:
+      o?.verification_status === 'proposed' && o.document_id && !o.issues.length ? (o.group_reasons ?? []).join(' ') : '',
     duplicateNote: o?.possible_duplicates.length
       ? 'The same result, date and unit also appears elsewhere in the archive. Charts show it once.'
       : '',
@@ -147,12 +152,6 @@ export function reviewVM(store: AppStore) {
   const conf = L.filter((l) => l.status === 'confirmed').length,
     exc = L.filter((l) => l.status === 'excluded').length,
     edt = all.filter((l) => l.edited).length;
-  const highPending = L.filter(
-    (l) =>
-      l.status === 'pending' &&
-      l.conf === 'high' &&
-      (!real || real.observations.find((o) => o.id === l.key)?.confidence === 'high'),
-  );
   const dr = s.rvDraft;
   const seg = (on: boolean) => ({ bg: on ? C.ink : C.paper, fg: on ? C.paper : C.ink, pressed: !!on });
   const stText = (l: Item) =>
@@ -172,13 +171,26 @@ export function reviewVM(store: AppStore) {
     sqb: l.conf === 'low' && l.status === 'pending' ? '2px solid ' + C.rust : '1px solid ' + C.ink,
   });
   const filt = s.rvFilter || 'all';
+  // Results ready for group approval are shown in their table, not again below it.
+  const inTable = new Set((real?.observations ?? []).filter((o) => o.group_eligible && o.verification_status === 'proposed').map((o) => o.id));
   const showL = L.filter(
     (l) =>
-      filt === 'all' ||
-      (filt === 'attention'
-        ? (l.status === 'pending' && l.conf === 'low') || l.status === 'pending'
-        : l.status !== 'pending'),
+      !inTable.has(l.key) &&
+      (filt === 'all' ||
+        (filt === 'attention'
+          ? (l.status === 'pending' && l.conf === 'low') || l.status === 'pending'
+          : l.status !== 'pending')),
   );
+  const tables = new Map<string, LabObservation[]>();
+  for (const o of real?.observations ?? []) {
+    if (inTable.has(o.id)) tables.set(o.review_group!, [...(tables.get(o.review_group!) ?? []), o]);
+  }
+  const approvedTogether = new Map<string, LabObservation[]>();
+  for (const o of real?.observations ?? []) {
+    if (o.approved_group_id) approvedTogether.set(o.approved_group_id, [...(approvedTogether.get(o.approved_group_id) ?? []), o]);
+  }
+  const countAndDate = (rows: LabObservation[]) =>
+    `${plural(rows.length, 'result')}${rows[0].collected_on ? ` collected ${fLong(rows[0].collected_on)}` : ', collection date unknown'}`;
   const editKey = s.rvEdit;
   const out = {
     rvIsReview: s.rvStage === 'review',
@@ -190,6 +202,7 @@ export function reviewVM(store: AppStore) {
     },
     rvIsReal: !!real,
     rvContentUrl: d.contentUrl ? d.contentUrl + (s.rvSourcePage ? `#page=${s.rvSourcePage}` : '') : null,
+    rvFileUrl: d.contentUrl ?? null,
     rvError: real ? s.rvError : null,
     rvIdentity: real?.identity?.status === 'possible_mismatch' ? real.identity.reason : null,
     rvTitle: d.title,
@@ -388,7 +401,53 @@ export function reviewVM(store: AppStore) {
         sqOf(l),
       ),
     ),
-    rvLinesEmpty: !showL.length && L.length > 0,
+    rvLinesEmpty: !showL.length && L.length > 0 && !inTable.size,
+    rvHasIndividual: showL.length > 0,
+    rvGroupError: s.rvGroupError,
+    rvGroups: filt === 'done' ? [] : [...tables.entries()].map(([key, rows]) => ({
+      key,
+      label: rows[0].review_group_label ?? 'Results',
+      // Says exactly what will happen, for exactly what is on the screen.
+      approveLabel: `Approve ${countAndDate(rows)}`,
+      onApprove: () =>
+        void store.approveGroup({
+          document_id: id,
+          group: key,
+          collected_on: rows[0].collected_on,
+          items: rows.map((o) => ({ id: o.id, version: o.version ?? 0 })),
+        }),
+      // In the order printed, so it can be read straight down against the original.
+      rows: [...rows].sort((x, y) => (x.source_page ?? 0) - (y.source_page ?? 0) || (x.source_line ?? 0) - (y.source_line ?? 0)).map((o) => {
+        const extras = lineExtras(store, real, o.id);
+        return {
+          id: o.id,
+          version: o.version ?? 0,
+          page: o.source_page ?? 0,
+          observation: o,
+          name: o.reported_name,
+          value: o.value_text,
+          unit: o.unit ?? '',
+          range: o.reference_text ?? '',
+          flag: o.flag ?? '',
+          collected: o.collected_on ? fShort(o.collected_on) : '',
+          source: `p.${o.source_page} l.${o.source_line}`,
+          sourceText: o.source_text ?? '',
+          note: extras.duplicateNote,
+          isEditing: editKey === o.id,
+          onShowPage: extras.onShowPage,
+          onAccept: () => void store.setObservationStatus(o.id, 'verify'),
+          onReject: () => void store.setObservationStatus(o.id, 'reject'),
+          onEdit: () => store.setState({ rvEdit: o.id, rvLine: o.id }),
+          onSaveForm: extras.onSaveForm,
+          onCancelForm: extras.onCancelForm,
+        };
+      }),
+    })),
+    rvApprovedGroups: [...approvedTogether.entries()].map(([groupId, rows]) => ({
+      id: groupId,
+      text: `${countAndDate(rows)} ${rows.length === 1 ? 'was' : 'were'} approved as a group on ${fShort(rows[0].revisions[rows[0].revisions.length - 1].occurred_at.slice(0, 10))}.`,
+      onUndo: () => void store.undoGroup(groupId),
+    })),
     rvFilters: (
       [
         ['all', 'All ' + L.length],
@@ -398,21 +457,6 @@ export function reviewVM(store: AppStore) {
     ).map(([fk, fl]) =>
       Object.assign({ label: fl, onClick: () => store.setState({ rvFilter: fk }) }, seg(filt === fk)),
     ),
-    rvHasHigh: highPending.length > 0,
-    rvHighLabel: (real ? 'Accept all ' : 'Confirm all ') + highPending.length + ' high-confidence values',
-    rvConfirmHigh: () =>
-      real
-        ? void store.verifyObservations(highPending.map((l) => l.key))
-        : store.setState((st) => {
-            const rv = Object.assign({}, st.rv);
-            const c = Object.assign({ lines: {}, fields: {} }, rv[id]);
-            c.lines = Object.assign({}, c.lines);
-            highPending.forEach((l) => {
-              c.lines[l.key] = Object.assign({}, c.lines[l.key], { status: 'confirmed' });
-            });
-            rv[id] = c;
-            return { rv };
-          }),
     rvPendingText: pending
       ? plural(pending, 'item') +
         (real

@@ -53,6 +53,13 @@ export type ListedItem = { id: number; path: string; state: ImportReportItem['st
 export type ReportQuery = { category: ImportCategory | null; identity: string | null; limit: number };
 
 /** The operations only a real archive has. The demo archive has no backend at all. */
+export interface GroupApproval {
+  document_id: string;
+  group: string;
+  collected_on: string | null;
+  items: { id: string; version: number }[];
+}
+
 export interface DocumentsBackend {
   maxUploadBytes: number;
   listDocuments(): Promise<ArchiveDocument[]>;
@@ -62,7 +69,9 @@ export interface DocumentsBackend {
   listObservations(): Promise<LabObservation[]>;
   correctObservation(id: string, fields: ObservationFieldValues): Promise<LabObservation>;
   setObservationStatus(id: string, action: 'verify' | 'reject' | 'reopen'): Promise<LabObservation>;
-  verifyObservations(ids: string[]): Promise<unknown>;
+  /** Approves exactly these rows at these versions, or nothing. */
+  approveGroup(approval: GroupApproval): Promise<unknown>;
+  undoGroup(groupId: string): Promise<unknown>;
   createObservation(
     fields: ObservationFieldValues,
     documentId: string | null,

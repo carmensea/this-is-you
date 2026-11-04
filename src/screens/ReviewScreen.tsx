@@ -1,6 +1,7 @@
 import { Segmented } from '../components/controls';
 import { ObservationForm } from '../components/ObservationForm';
 import { OriginalFile } from '../components/OriginalFile';
+import { ReviewGroups } from './ReviewGroups';
 import { useStore } from '../state/useStore';
 import { C, MONO, SANS, SERIF } from '../theme';
 import { s } from '../components/styles';
@@ -267,14 +268,6 @@ function ExtractedValues({ v }: { v: VM }) {
                 </button>
               )}
               <Segmented items={v.rvFilters} />
-              {v.rvHasHigh && (
-                <button
-                  onClick={v.rvConfirmHigh}
-                  style={{ fontSize: 12.5, color: C.green, borderBottom: `1px solid ${C.green}` }}
-                >
-                  {v.rvHighLabel}
-                </button>
-              )}
             </div>
           </div>
           {v.rvAdding && (
@@ -290,6 +283,7 @@ function ExtractedValues({ v }: { v: VM }) {
               No measurements were recognized in this document. If it contains results, add them by hand.
             </p>
           )}
+          <ReviewGroups v={v} />
           <div style={{ overflowX: 'auto' }}>
             <div style={{ minWidth: 640 }}>
               <div
@@ -371,6 +365,7 @@ function ExtractedValues({ v }: { v: VM }) {
                     <span style={{ color: l.statusColor }}>{l.statusText}</span>
                     {l.dates && <span style={{ color: C.ink2 }}>{l.dates}</span>}
                     {l.isLow && <span style={{ color: C.rust }}>{l.reason}</span>}
+                    {l.groupNote && <span style={{ color: C.rust }}>{l.groupNote}</span>}
                     {l.isEdited && <span style={{ color: C.muted }}>{l.realEditedText || l.editedText}</span>}
                     {l.duplicateNote && <span style={{ color: C.amber }}>{l.duplicateNote}</span>}
                     {l.evidence && (

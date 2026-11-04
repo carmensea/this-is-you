@@ -30,6 +30,7 @@ from .backup import (
 from .backup_crypto import EXTENSION, MIN_PASSPHRASE, load_key, make_key, save_key
 from .config import UnsafeConfiguration, is_loopback_host, load_settings
 from .db import make_engine, migrate
+from .lab_confidence_repair import repair as repair_lab_confidence, repair_date_doubt
 from .extraction.sandbox import FULL, UNAVAILABLE, configure, isolation
 
 
@@ -201,6 +202,10 @@ def main() -> None:
     prune.add_argument("--keep", type=int, default=3, help="Newest backups to keep. The newest that passed a check is always kept.")
     prune.add_argument("--include-replaced", action="store_true", help="Also list archives moved aside by a restore.")
     prune.add_argument("--yes", action="store_true", help="Remove what is listed.")
+    repair = commands.add_parser("repair-lab-confidence", help="Count results marked low confidence only by the collection date bug. Changes them only with --apply. Approves nothing.")
+    repair.add_argument("--apply", action="store_true", help="Make the change, all of it or none.")
+    date_repair = commands.add_parser("repair-date-warning", help="Count unreviewed results still warning that a date could be read two ways. Clears the warning only with --apply. Approves nothing.")
+    date_repair.add_argument("--apply", action="store_true", help="Make the change, all of it or none.")
     args = parser.parse_args()
     try:
         settings = load_settings()
@@ -232,6 +237,12 @@ def main() -> None:
             _restore(args)
         elif args.command == "prune":
             _prune(settings, args)
+        elif args.command == "repair-lab-confidence":
+            report = repair_lab_confidence(_sessions(settings), apply=args.apply)
+            print(f"Candidates: {report.candidates}. {'Corrected' if args.apply else 'Could be corrected'}: {sum(report.safe.values())} {dict(report.safe)}. Left for individual review: {sum(report.uncertain.values())} {dict(report.uncertain)}.")
+        elif args.command == "repair-date-warning":
+            report = repair_date_doubt(_sessions(settings), apply=args.apply)
+            print(f"Candidates: {report.candidates}. {'Corrected' if args.apply else 'Could be corrected'}: {sum(report.safe.values())} {dict(report.safe)}. Left as they are: {sum(report.uncertain.values())} {dict(report.uncertain)}.")
     except BackupProblem as problem:
         sys.exit(str(problem))
     except OSError:

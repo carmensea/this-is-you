@@ -26,7 +26,7 @@ function backendWith(answer: Answer = {}, documents: DocumentDto[] = []) {
     listDocuments: vi.fn(async () => documents.map(toArchiveDocument)),
     decide: vi.fn(), setReview: vi.fn(), readAgain: vi.fn(),
     listObservations: vi.fn(async () => []),
-    correctObservation: vi.fn(), setObservationStatus: vi.fn(), verifyObservations: vi.fn(), createObservation: vi.fn(),
+    correctObservation: vi.fn(), setObservationStatus: vi.fn(), approveGroup: vi.fn(), undoGroup: vi.fn(), createObservation: vi.fn(),
   } as unknown as DocumentsBackend & { rows: ReturnType<typeof fakeImportServer>['rows']; down: boolean };
 }
 

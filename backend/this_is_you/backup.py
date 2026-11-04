@@ -42,7 +42,7 @@ _ORIGINAL = re.compile(r"originals/([0-9a-f]{2})/([0-9a-f]{2})/\1\2[0-9a-f]{60}\
 # and a restored archive is signed in to again with a passphrase set on that machine.
 _NOT_BACKED_UP = ("auth_credential", "auth_sessions")
 KEEP_BEFORE_UPGRADE = 2
-_COUNTED = ("documents", "import_events", "extraction_runs", "metadata_proposals", "metadata_decisions", "lab_observations", "lab_observation_revisions", "import_batches", "import_items", "identity_profile")
+_COUNTED = ("documents", "import_events", "extraction_runs", "metadata_proposals", "metadata_decisions", "lab_observations", "lab_observation_revisions", "import_batches", "import_items", "identity_profile", "review_group_approvals")
 _CHUNK = 1024 * 1024
 
 

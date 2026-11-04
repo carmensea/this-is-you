@@ -84,13 +84,11 @@ def test_accept_publishes_only_that_result(client):
     assert [v["reported_name"] for v in verified(client)] == ["HDL Cholesterol"]
 
 
-def test_batch_approval_is_all_or_nothing(client):
+def test_no_route_approves_a_list_of_results_without_checking_them(client):
     doc = imported(client, pdfs.LIPID_BOUNDS)
     ids = [o["id"] for o in rows(client, doc)]
-    assert post(client, "/api/observations/verify", {"ids": [*ids, "f" * 32]}).status_code == 404
+    assert post(client, "/api/observations/verify", {"ids": ids}).status_code in (404, 405, 422)
     assert verified(client) == []
-    assert post(client, "/api/observations/verify", {"ids": ids}).status_code == 200
-    assert len(verified(client)) == 4
 
 
 def test_rejected_results_are_not_published_and_can_be_restored(client):
@@ -202,7 +200,7 @@ def test_requests_need_the_app_header(client):
     o = named(client, doc, "HDL Cholesterol")
     for action in ("verify", "reject", "reopen", "correct"):
         assert client.post(f"/api/observations/{o['id']}/{action}", json={}).status_code == 403
-    assert client.post("/api/observations/verify", json={"ids": [o["id"]]}).status_code == 403
+    assert client.post("/api/observations/approve-group", json={}).status_code == 403
 
 
 def test_unknown_ids_are_404(client):

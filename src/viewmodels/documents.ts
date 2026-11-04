@@ -210,6 +210,8 @@ export function documentsVM(store: AppStore) {
       : [];
   const pages = Math.max(1, lines.length ? Math.ceil(lines.length / 8) : sel.pages || 1);
   const page = Math.min(s.dPage || 0, pages - 1);
+  const goToPage = (next: number) =>
+    store.setState({ dPage: next, ...(sel.contentUrl ? { dSource: { id: sel.id, page: next + 1 } } : {}) });
   const ev = sel.ev ? archive.events.find((e) => e.id === sel.ev) : null;
   const known = inRec(sel);
   const lineStatus = (mkKey: string): [string, string] =>
@@ -331,8 +333,8 @@ export function documentsVM(store: AppStore) {
         store.setState({ dSel: sel.dup ?? sel.review?.possibleDuplicates[0] ?? null, dPage: 0, dHL: null }),
       ddMultiPage: pages > 1,
       ddPageText: 'Page ' + (page + 1) + ' of ' + pages,
-      ddPrev: () => store.setState({ dPage: Math.max(0, page - 1) }),
-      ddNext: () => store.setState({ dPage: Math.min(pages - 1, page + 1) }),
+      ddPrev: () => goToPage(Math.max(0, page - 1)),
+      ddNext: () => goToPage(Math.min(pages - 1, page + 1)),
       ddIsLab: preview,
       ddNoPreview: !preview,
       ddPlaceholder:

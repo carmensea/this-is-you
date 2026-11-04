@@ -70,6 +70,7 @@ class LabRow:
     source: str
     confidence: str
     issues: list[str] = field(default_factory=list)
+    section: int = 0  # Rises each time the report prints a different collection line.
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -89,8 +90,7 @@ def _labeled_date(pattern: re.Pattern, text: str, today: date) -> _Dated | None:
     if not found:
         return None
     first = found[0]
-    if first.ambiguous:
-        return _Dated(first.iso, f"This date could be read two ways: {first.iso} or {first.ambiguous}.")
+    # Numeric dates are month first. That is a rule of this archive, so it is not a doubt.
     if first.two_digit_year:
         return _Dated(first.iso, "This date is written with a two-digit year.")
     return _Dated(first.iso, None)
@@ -288,9 +288,11 @@ def _rows_from_lines(lines: list[Line], today: date) -> list[LabRow]:
     service: _Dated | None = None
     reported: _Dated | None = None
     all_collected: set[str] = set()
-    needs_backfill: list[LabRow] = []
+    needs_backfill: list[tuple[LabRow, str]] = []  # With its confidence before any penalty for the date.
     in_table = False
     pending: _Pending | None = None
+    section = 0
+    collection_line: str | None = None
 
     def add_date_issues(row: LabRow) -> None:
         source = collected or service
@@ -307,9 +309,11 @@ def _rows_from_lines(lines: list[Line], today: date) -> list[LabRow]:
             row.confidence = LOW
 
     def add(row: LabRow) -> None:
+        row.section = section
+        assessed = row.confidence
         add_date_issues(row)
         if collected is None:
-            needs_backfill.append(row)
+            needs_backfill.append((row, assessed))
         rows.append(row)
 
     def finish_pending() -> None:
@@ -326,6 +330,10 @@ def _rows_from_lines(lines: list[Line], today: date) -> list[LabRow]:
     for line in lines:
         if found := _labeled_date(_COLLECTED, line.text, today):
             finish_pending()
+            # A repeated page heading says the same thing again. A different line, even on one day, is another collection.
+            if collection_line is not None and line.text != collection_line:
+                section += 1
+            collection_line = line.text
             collected = found
             all_collected.add(found.iso)
             continue_scan = _labeled_date(_REPORTED, line.text, today)
@@ -415,11 +423,14 @@ def _rows_from_lines(lines: list[Line], today: date) -> list[LabRow]:
     # Reports often print results before the header details. If one collection date covers the whole
     # report, it applies to those rows too. With several, there is no telling, so they stay unknown.
     if len(all_collected) == 1 and collected is not None:
-        for row in needs_backfill:
+        for row, assessed in needs_backfill:
             row.collected = collected.iso
+            row.section = section
             row.issues = [i for i in row.issues if "No collection date" not in i and "date of service" not in i]
             if collected.issue:
                 row.issues.append(collected.issue)
+            # Confidence follows the warnings that remain, so a resolved date takes its penalty with it.
+            row.confidence = LOW if row.issues else assessed
     if reported is not None:
         for row in rows:
             row.reported = reported.iso

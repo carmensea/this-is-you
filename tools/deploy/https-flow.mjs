@@ -131,9 +131,9 @@ ok('the original is served to its session', response.count >= 1 && response.stat
 ok('it is marked not to be stored by the browser', response.cache === 'no-store');
 await page.goto(`${ORIGIN}/#/documents`);
 await page.waitForSelector('main');
-const viewer = page.frameLocator('iframe').first();
+await page.locator('[aria-label^="Original file"] canvas').first().waitFor({ timeout: 30000 });
 await page.waitForTimeout(1500);
-ok('the PDF viewer frame loads under the content policy', (await page.locator('iframe').count()) >= 1 && !!viewer);
+ok('the original is drawn under the content policy', await page.locator('[aria-label^="Original file"] canvas').first().evaluate((c) => c.width > 0));
 
 await page.goto(`${ORIGIN}/#/import`);
 await page.getByRole('heading', { name: 'Backups' }).waitFor();

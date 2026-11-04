@@ -88,6 +88,7 @@ class RevisionOut(BaseModel):
     action: str
     values: dict
     occurred_at: str
+    review_group_id: str | None = None
 
 
 class ObservationOut(BaseModel):
@@ -127,10 +128,17 @@ class ObservationOut(BaseModel):
     original: dict
     possible_duplicates: list[str]
     revisions: list[RevisionOut]
+    version: int
+    review_group: str | None = None
+    review_group_label: str | None = None
+    group_eligible: bool = False
+    group_reasons: list[str] = []
+    approved_group_id: str | None = None
 
     @classmethod
-    def of(cls, o: Observation, duplicates: dict[str, list[str]] | None = None) -> "ObservationOut":
+    def of(cls, o: Observation, duplicates: dict[str, list[str]] | None = None, groups: dict | None = None) -> "ObservationOut":
         test = BY_CODE.get(o.test_code or "")
+        group = (groups or {}).get(o.id)
         return cls(
             id=o.id, document_id=o.document_id, origin=o.origin.value, extraction_status=o.extraction_status.value, verification_status=o.verification_status.value,
             confidence=o.confidence.value if o.confidence else None, reported_name=o.reported_name, test_code=o.test_code, code_system=o.code_system,
@@ -141,7 +149,11 @@ class ObservationOut(BaseModel):
             source_page=o.source_page, source_line=o.source_line, source_text=o.source_text, issues=o.issues,
             edited=any(r.action is RevisionAction.CORRECTED for r in o.revisions), original=o.revisions[0].values if o.revisions else {},
             possible_duplicates=(duplicates or {}).get(o.id, []),
-            revisions=[RevisionOut(action=r.action.value, values=r.values, occurred_at=r.occurred_at) for r in o.revisions],
+            revisions=[RevisionOut(action=r.action.value, values=r.values, occurred_at=r.occurred_at, review_group_id=r.review_group_id) for r in o.revisions],
+            version=max((r.id for r in o.revisions), default=0),
+            review_group=group.key if group else None, review_group_label=group.label if group else None,
+            group_eligible=group.eligible if group else False, group_reasons=list(group.reasons) if group else [],
+            approved_group_id=o.approved_group_id,
         )
 
 

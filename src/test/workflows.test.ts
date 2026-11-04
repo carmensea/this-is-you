@@ -45,7 +45,7 @@ describe('review', () => {
     store.openReview(id);
     expect(reviewVM(store)!.rvContinueDisabled).toBe(true);
 
-    reviewVM(store)!.rvConfirmHigh();
+    reviewVM(store)!.rvLines.filter(l => !l.isLow).forEach(l => l.onConfirm());
     reviewVM(store)!.rvFields.forEach(f => f.onConfirm());
     reviewVM(store)!.rvLines.filter(l => l.isLow).forEach(l => l.onExclude());
     const v = reviewVM(store)!;

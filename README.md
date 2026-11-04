@@ -44,6 +44,7 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 | `npm run perf:compare -- <old dist> <new dist>` | Alternates two builds to judge a change, about 15 minutes |
 | `npm run deploy:https-flow` | The app in production mode in Chrome, through an HTTPS proxy like `tailscale serve`, on a fictional archive |
 | `deploy/test/verify-vm.sh PHASE` | The Compose deployment on a real Linux machine, with attacks and crashes. **Wipes `/srv/this-is-you`: throwaway machines only.** |
+| `npm run readiness:review` | Group review in Chrome on a fictional archive: corrections, stale groups, approval, undo and real restarts |
 | `npm run readiness:dev` | Sign in, import and sign out through the real dev server, on a fictional archive. About 1 minute. |
 | `npm run readiness -- [--scale 1]` | The whole import, crash, backup and restore workflow in Chrome, on a messy fictional folder. About 4 minutes at scale 1. Needs a prior build. |
 
@@ -100,7 +101,7 @@ Choose or drop a folder on the Import screen. Nested folders are included, and f
 
 - **Every file gets a line in the report,** including files that were refused. Nothing is skipped silently.
 - **The report is saved in the archive,** so closing the browser or a crash does not lose it. Sending stops if the browser closes, because only the browser can read your folder. Reading continues in the service.
-- **To continue,** choose the same folder again. Finished files are not sent again, and identical bytes are one document, however many times they arrive. A file's report line changes in the same database transaction as its document, so the two cannot disagree after a crash.
+- **To continue,** choose the same folder again. Finished files are not sent again, and identical bytes are one document, however many times they arrive. A file's report line changes in the same database transaction as its document. One crash window can still leave the report off by one, with no file lost: see [known issues](docs/known-issues.md).
 - **Stored, read and verified are separate.** A scanned file is stored and not read. Nothing is verified by importing.
 - **Retry failures** reads failed files again. Files that never arrived need the folder chosen again after a page reload, since the browser no longer has access to them.
 - Your files are only read, never changed. **Remove this report** deletes the report and its folder paths from the archive after asking. The documents stay, and older backups still hold the report.
@@ -165,6 +166,8 @@ Each document has three separate statuses:
 
 **Result tables.** Differentials and blood count unit spellings such as `10*3/uL` and `K/mcL` are included. Tables headed "Your Value", "Standard Range" or "Component Results" are read whether each row is on one line, each cell is on its own line, or a label sits beside each value, and they can continue across pages. Only cells that follow one another under one test name are joined, so a page where all names come before all values is not paired up by counting. A row that could only be partly read is still listed, with what is uncertain, and one with no value cannot be approved until you enter it. These layouts were built from fictional examples of the general format, so a real report may still differ.
 
+**Reviewing many results.** Complete results appear in a table beside the original, grouped by document, collection date and kind of test. A group is only a convenience for checking, not a claim that it is one clinical panel. You can correct, accept or reject any row in the table, and the button says exactly how many results it approves and their date. The server approves only that exact set: if any row changed or was added since it was shown, nothing is approved and the table catches up. Anything incomplete or uncertain goes to individual review below the table, with the reason. Nothing is ever approved automatically. **Undo group approval** returns the results to review, and the history keeps both. Each approved result records which group approved it and when.
+
 **What is never made up.** A missing unit stays missing. A flag is only what the laboratory printed, and is never worked out from the range. Values are kept exactly as printed, so 14.20 stays 14.20.
 
 **Four separate dates.** Each result keeps these apart, and none stands in for another:
@@ -185,6 +188,14 @@ Each document has three separate statuses:
 **Charts.** Only verified results with a collection date and an exact number are drawn. Limits such as `<0.5`, and results with no collection date, are listed but not drawn. Each point keeps the range printed on its own report, and no band is drawn when none was printed. Different units are plotted separately, and comparisons across units are refused. The app stores a converted value when a conversion for that test is known, but charts do not use it. The same test, date, value and unit from two documents is drawn once. Numbers are shown as recorded, and the app does not say whether a change is good or bad.
 
 **Test identifiers** are this app's own (`this-is-you-v1`), not LOINC, because a correct LOINC code depends on specimen and method details that reports often leave out.
+
+## Viewing an original
+
+Originals are drawn on the page by pdf.js, on this computer. Hover over a page to magnify it, and click a page to enlarge it in the same tab. A file it cannot draw falls back to the browser's own viewer, and Download original always stays. Text in the drawn pages cannot be selected.
+
+Numeric dates are read month first (03/11/2024 is 11 March), and this alone is not a reason for low confidence. A date that only works day first, such as 28/03/2024, is read that way. A two-digit year still gets a warning.
+
+In a review table, each row of the PDF is cut out and shown above what was read from it. Tick each row that matches, or use the box at the top to tick every row shown. Approve turns on when every row is ticked, and nothing is approved before that. A row that changes must be ticked again. A row that cannot be found for certain in the page's text says so, and the top box leaves it for you to check and tick yourself.
 
 ## What the document reader does not handle
 
@@ -217,7 +228,8 @@ Each document has three separate statuses:
 | `POST /api/observations` | Enter a result by hand |
 | `POST /api/observations/{id}/correct` | Correct a result. Takes it off the charts until accepted again. |
 | `POST /api/observations/{id}/verify`, `/reject`, `/reopen` | Accept, reject or reopen one result |
-| `POST /api/observations/verify` | Accept several in one transaction |
+| `POST /api/observations/approve-group` | Approve one exact set of rows at the versions shown. All of them, or none. |
+| `POST /api/observations/group-approvals/{id}/undo` | Return a group to review. The history is kept. |
 | `GET /api/lab-tests` | The known tests |
 | `POST /api/import-batches`, `GET /api/import-batches` | Start a batch, or list saved reports with their counts |
 | `POST /api/import-batches/{id}/items` | List up to 500 files. Listing one twice returns the same row. |

@@ -3,7 +3,7 @@ import { addMonths, fLong } from '../domain/dates';
 import { rangeOnly, fmtR } from '../domain/format';
 import { DCATL } from '../domain/vocabulary';
 import type { Archive, ArchiveDocument, ArchiveHealth, BackupListing, HealthEvent, IdentityDetails, ImportFile, ImportJob, ISODate, LowConfidenceNote, MetadataFieldKey, SnapshotMode } from '../domain/types';
-import { ArchiveRequestError, type DocumentsBackend, type FieldDecision, type ObservationFieldValues } from '../services/archiveApi';
+import { ArchiveRequestError, type DocumentsBackend, type FieldDecision, type GroupApproval, type ObservationFieldValues } from '../services/archiveApi';
 import { FIELD_LABEL, FIELD_ORDER, displayValue, isReading } from '../domain/documentReview';
 import { listOnly, simulateProcessing } from '../services/importService';
 import { buildPersonalArchive, todayLocal } from '../services/localArchiveApi';
@@ -123,6 +123,7 @@ export interface AppState {
   signedOut: boolean;
   /** Why the last decision on a real document could not be saved. */
   rvError: string | null;
+  rvGroupError: string | null;
   /** The page of the original to show, when following a proposal back to its source. */
   rvSourcePage: number | null;
   /** The add-a-measurement form on the review screen. */
@@ -195,6 +196,7 @@ export const initialState: AppState = {
   rvStage: 'review',
   rvFilter: 'all',
   rvError: null,
+  rvGroupError: null,
   rvSourcePage: null,
   rvAdding: false,
   dSource: null,
@@ -413,6 +415,7 @@ export class AppStore {
       rvEdit: null,
       rvFilter: 'all',
       rvError: null,
+      rvGroupError: null,
       rvSourcePage: null,
       rvAdding: false,
       ...extra,
@@ -576,7 +579,22 @@ export class AppStore {
   // Laboratory results
   setObservationStatus = (id: string, action: 'verify' | 'reject' | 'reopen') =>
     this.saving((backend) => backend.setObservationStatus(id, action));
-  verifyObservations = (ids: string[]) => this.saving((backend) => backend.verifyObservations(ids));
+
+  /** Either way the screen catches up: after a refusal the person has to see what changed before trying again. */
+  private async groupAction(work: (backend: DocumentsBackend) => Promise<unknown>) {
+    if (!this.backend) return;
+    let rvGroupError: string | null = null;
+    try {
+      await work(this.backend);
+    } catch (problem) {
+      rvGroupError = problem instanceof ArchiveRequestError ? problem.message : 'This could not be saved, so nothing changed.';
+    }
+    await this.refreshDocuments(this.backend);
+    this.setState({ rvGroupError });
+  }
+
+  approveGroup = (approval: GroupApproval) => this.groupAction((backend) => backend.approveGroup(approval));
+  undoGroup = (groupId: string) => this.groupAction((backend) => backend.undoGroup(groupId));
 
   private async attempt(
     work: (backend: DocumentsBackend) => Promise<unknown>,

@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { readinessStub } from './fakeBackend';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../App';
-import { fShort, toT } from '../domain/dates';
+import { fLong, fShort, toT } from '../domain/dates';
 import type { ArchiveDocument, LabObservation } from '../domain/types';
 import type { DocumentsBackend } from '../services/archiveApi';
 import {
@@ -93,7 +93,8 @@ function fakeBackend(): DocumentsBackend {
     listObservations: vi.fn(async () => []),
     correctObservation: vi.fn(async () => obs()),
     setObservationStatus: vi.fn(async () => obs()),
-    verifyObservations: vi.fn(async () => []),
+    approveGroup: vi.fn(async () => []),
+    undoGroup: vi.fn(async () => []),
     createObservation: vi.fn(async () => obs()),
   };
 }
@@ -552,7 +553,7 @@ describe('the review table', () => {
         confidence: 'low',
       }),
     ]);
-    expect(container.querySelector('iframe')).not.toBeNull();
+    expect(container.querySelector('[aria-label^="Original file"]')).not.toBeNull();
     expect(container.textContent).toContain('Collected unknown · Reported unknown · Documented unknown');
     expect(container.textContent).toContain('No collection date was found.');
     expect(container.textContent).toContain('Source, page 1, line 4: "LDL Cholesterol 118 mg/dL <100"');
@@ -638,15 +639,148 @@ describe('the review table', () => {
       `First read as LDL Cholesterol 118 mg/dL, collected ${fShort('2020-06-15')}. Kept in the history.`,
     );
   });
-  it('confirm-all covers only clean, high-confidence results', async () => {
-    const clean = proposed();
-    const doubtful = proposed({ confidence: 'low', issues: ['Check it.'], reported_name: 'TSH' });
-    const medium = proposed({ confidence: 'medium', reported_name: 'HDL' });
-    const { backend } = open([clean, doubtful, medium]);
-    await act(async () => {
-      fireEvent.click(screen.getByText('Accept all 1 high-confidence values'));
+  describe('review groups', () => {
+    const clean = (over: Partial<LabObservation> = {}) =>
+      proposed({ group_eligible: true, review_group: '2020-06-15|cbc|0', review_group_label: 'Complete blood count', version: 7, source_page: 2, source_line: 9, collected_on: '2020-06-15', ...over });
+    const ids = ['a', 'b', 'c'].map((c) => c.repeat(32));
+    const threeClean = () => [clean({ id: ids[0], reported_name: 'WBC', value_text: '6.2', unit: 'x10E3/uL', reference_text: '3.4-10.8' }), clean({ id: ids[1], reported_name: 'Hemoglobin', value_text: '13.9', unit: 'g/dL', flag: 'Low', version: 8 })];
+
+    const tickAll = async () => fireEvent.click(await screen.findByRole('checkbox', { name: /^All 2 match the original/ }));
+    const approve = () => screen.getByRole('button', { name: /^Approve 2 results/ }) as HTMLButtonElement;
+
+    it('keeps the approve button off until every row is ticked', async () => {
+      const { backend } = open(threeClean());
+      await screen.findByRole('checkbox', { name: /^All 2 match the original/ });
+      await waitFor(() => expect((screen.getByRole('checkbox', { name: /^All 2 match/ }) as HTMLInputElement).disabled).toBe(false));
+      expect(approve().disabled).toBe(true);
+      fireEvent.click(screen.getByRole('checkbox', { name: 'WBC matches the original' }));
+      expect(approve().disabled).toBe(true);
+      fireEvent.click(approve());
+      expect(backend.approveGroup).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Hemoglobin matches the original' }));
+      expect(approve().disabled).toBe(false);
+      fireEvent.click(screen.getByRole('checkbox', { name: 'WBC matches the original' }));
+      expect(approve().disabled).toBe(true);
     });
-    expect(backend.verifyObservations).toHaveBeenCalledWith([clean.id]);
+    it('ticks every row from the top, and unticks them again', async () => {
+      open(threeClean());
+      await waitFor(() => expect((screen.getByRole('checkbox', { name: /^All 2 match/ }) as HTMLInputElement).disabled).toBe(false));
+      await tickAll();
+      expect((screen.getByRole('checkbox', { name: 'WBC matches the original' }) as HTMLInputElement).checked).toBe(true);
+      expect(approve().disabled).toBe(false);
+      await tickAll();
+      expect((screen.getByRole('checkbox', { name: 'WBC matches the original' }) as HTMLInputElement).checked).toBe(false);
+      expect(approve().disabled).toBe(true);
+    });
+    it('will not tick from the top a row whose line could not be shown', async () => {
+      const { openPdf } = await import('../services/pdfViewer');
+      const found = { left: 0.1, top: 0.2, right: 0.9, bottom: 0.22, valueLeft: 0.5 };
+      vi.mocked(openPdf).mockResolvedValueOnce({ pages: 2, ratio: () => 1.3, render: () => ({ done: Promise.resolve(), cancel: () => {} }), close: () => {}, findRow: async (_page, source) => (source.startsWith('WBC') ? found : null) });
+      open([clean({ id: ids[0], reported_name: 'WBC', source_text: 'WBC 6.2' }), clean({ id: ids[1], reported_name: 'Hemoglobin', source_text: 'Hemoglobin 13.9' })]);
+      fireEvent.click(await screen.findByRole('checkbox', { name: 'All 1 shown match the original' }));
+      expect(screen.getByText(/could not be cut from page 2/)).toBeTruthy();
+      expect((screen.getByRole('checkbox', { name: 'Hemoglobin matches the original' }) as HTMLInputElement).checked).toBe(false);
+      expect(approve().disabled).toBe(true);
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Hemoglobin matches the original' }));
+      expect(approve().disabled).toBe(false);
+    });
+    it('has no shortcut that approves anything without a table', () => {
+      const { container } = open([proposed()]);
+      expect(container.textContent).not.toContain('high-confidence');
+      expect(container.textContent).not.toContain('Accept all');
+    });
+    it('shows every column beside the original, and names exactly what will be approved', () => {
+      const { container } = open(threeClean());
+      const table = screen.getByRole('region', { name: 'Complete blood count' });
+      for (const text of ['WBC', '6.2', 'x10E3/uL', '3.4-10.8', 'Hemoglobin', 'Low', fShort('2020-06-15'), 'p.2 l.9']) expect(table.textContent).toContain(text);
+      expect(container.querySelector('[aria-label^="Original file"]')).not.toBeNull();
+      expect(screen.getByRole('button', { name: `Approve 2 results collected ${fLong('2020-06-15')}` })).toBeTruthy();
+    });
+    it('lists rows in the order printed, to read straight down against the original', () => {
+      open([clean({ id: ids[0], reported_name: 'Later', source_page: 2, source_line: 3 }), clean({ id: ids[1], reported_name: 'First', source_page: 1, source_line: 9 }), clean({ id: ids[2], reported_name: 'Middle', source_page: 2, source_line: 1 })]);
+      const text = screen.getByRole('region', { name: 'Complete blood count' }).textContent ?? '';
+      expect(text.indexOf('First')).toBeLessThan(text.indexOf('Middle'));
+      expect(text.indexOf('Middle')).toBeLessThan(text.indexOf('Later'));
+    });
+    it('approves nothing until the button is pressed, then sends the exact rows and versions', async () => {
+      const { backend } = open(threeClean());
+      expect(backend.approveGroup).not.toHaveBeenCalled();
+      await tickAll();
+      expect(backend.approveGroup).not.toHaveBeenCalled();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^Approve 2 results/ }));
+      });
+      expect(backend.approveGroup).toHaveBeenCalledWith({ document_id: 'd'.repeat(32), group: '2020-06-15|cbc|0', collected_on: '2020-06-15', items: [{ id: ids[0], version: 7 }, { id: ids[1], version: 8 }] });
+    });
+    it('keeps results that need attention out of the table, and says why', () => {
+      const doubtful = proposed({ id: ids[2], reported_name: 'Fictional Marker', group_eligible: false, group_reasons: ['No reference range is recorded.'], issues: [], confidence: 'medium' });
+      const { container } = open([...threeClean(), doubtful]);
+      expect(screen.getByRole('region', { name: 'Complete blood count' }).textContent).not.toContain('Fictional Marker');
+      expect(screen.getByRole('button', { name: /^Approve 2 results/ })).toBeTruthy();
+      expect(container.textContent).toContain('Review individually');
+      expect(container.textContent).toContain('No reference range is recorded.');
+    });
+    it('shows no approve button when nothing is eligible', () => {
+      open([proposed({ group_eligible: false, group_reasons: ['No unit is recorded.'] })]);
+      expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull();
+    });
+    it('keeps categories and dates in separate tables with separate buttons', () => {
+      open([...threeClean(), clean({ id: ids[2], reported_name: 'Glucose', review_group: '2020-06-15|cmp|0', review_group_label: 'Metabolic panel' })]);
+      expect(screen.getByRole('button', { name: /^Approve 2 results/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /^Approve 1 result collected/ })).toBeTruthy();
+    });
+    it('still offers each result alone from the table', async () => {
+      const { backend } = open(threeClean());
+      const table = screen.getByRole('region', { name: 'Complete blood count' });
+      await act(async () => {
+        fireEvent.click(within(table).getAllByRole('button', { name: 'Accept' })[0]);
+      });
+      expect(backend.setObservationStatus).toHaveBeenCalledWith(ids[0], 'verify');
+      await act(async () => {
+        fireEvent.click(within(table).getAllByRole('button', { name: 'Reject' })[1]);
+      });
+      expect(backend.setObservationStatus).toHaveBeenCalledWith(ids[1], 'reject');
+    });
+    it('corrects a result in place', async () => {
+      const { backend } = open(threeClean());
+      const table = screen.getByRole('region', { name: 'Complete blood count' });
+      fireEvent.click(within(table).getAllByRole('button', { name: 'Edit' })[0]);
+      fireEvent.change(screen.getByLabelText('Value'), { target: { value: '6.3' } });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Save correction'));
+      });
+      expect(backend.correctObservation).toHaveBeenCalledWith(ids[0], { value_text: '6.3' });
+    });
+    it('shows why a stale group was refused, and catches up', async () => {
+      const { backend } = open(threeClean());
+      const { ArchiveRequestError } = await import('../services/archiveApi');
+      backend.approveGroup = vi.fn(async () => {
+        throw new ArchiveRequestError('This group changed after it was shown, so nothing was approved. Check it again.', 'group_changed');
+      });
+      const before = (backend.listObservations as Mock).mock.calls.length;
+      await tickAll();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^Approve 2 results/ }));
+      });
+      expect(screen.getByRole('alert').textContent).toContain('nothing was approved');
+      expect((backend.listObservations as Mock).mock.calls.length).toBeGreaterThan(before);
+    });
+    it('offers undo for a group approval, and says when it happened', async () => {
+      const gid = 'e'.repeat(32);
+      const row = obs({ approved_group_id: gid, collected_on: '2020-06-15', verification_status: 'verified', revisions: [{ action: 'verified', values: {}, occurred_at: '2026-10-20T10:00:00Z', review_group_id: gid }] });
+      const { backend, container } = open([row]);
+      expect(container.textContent).toContain(`1 result collected ${fLong('2020-06-15')} was approved as a group on ${fShort('2026-10-20')}.`);
+      expect(container.textContent).toContain('as part of a group');
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Undo group approval' }));
+      });
+      expect(backend.undoGroup).toHaveBeenCalledWith(gid);
+    });
+    it('shows a result approved alone with no group wording or undo', () => {
+      const { container } = open([obs({ verification_status: 'verified', approved_group_id: null })]);
+      expect(screen.queryByRole('button', { name: 'Undo group approval' })).toBeNull();
+      expect(container.textContent).not.toContain('as part of a group');
+    });
   });
   it('adds a measurement by hand to this document, still unverified', async () => {
     const { backend } = open([]);

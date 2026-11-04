@@ -92,6 +92,7 @@ class RevisionAction(str, enum.Enum):
     VERIFIED = "verified"
     REJECTED = "rejected"
     REOPENED = "reopened"
+    PARSER_FIX = "parser_fix"  # A corrected confidence. Never a person's decision.
 
 
 class Confidence(str, enum.Enum):
@@ -255,7 +256,11 @@ class Observation(Base):
     source_page: Mapped[int | None] = mapped_column(Integer)
     source_line: Mapped[int | None] = mapped_column(Integer)
     source_text: Mapped[str | None] = mapped_column(String(200))
+    # Which collection on its report this came from, when the report tells several apart. Empty on older readings.
+    source_section: Mapped[int | None] = mapped_column(Integer)
     issues: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # The group approval that accepted it, while that still stands. The history keeps it after that.
+    approved_group_id: Mapped[str | None] = mapped_column(String(32), index=True)
 
     document: Mapped[Document | None] = relationship()
     revisions: Mapped[list["ObservationRevision"]] = relationship(back_populates="observation", order_by="ObservationRevision.id")
@@ -271,8 +276,23 @@ class ObservationRevision(Base):
     action: Mapped[RevisionAction] = mapped_column(_stored_as_value(RevisionAction), nullable=False)
     values: Mapped[dict] = mapped_column(JSON, nullable=False)
     occurred_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    review_group_id: Mapped[str | None] = mapped_column(String(32))  # Set when this was done as part of a group approval or its undoing.
 
     observation: Mapped[Observation] = relationship(back_populates="revisions")
+
+
+class ReviewGroupApproval(Base):
+    """A person approving one exact set of results together. Never removed: undoing it only records that it was undone."""
+
+    __tablename__ = "review_group_approvals"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid4().hex)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), nullable=False, index=True)
+    group_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    collected_on: Mapped[str | None] = mapped_column(String(10))
+    result_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    approved_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    undone_at: Mapped[str | None] = mapped_column(String(32))
 
 
 class ImportBatch(Base):

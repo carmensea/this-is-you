@@ -61,9 +61,8 @@ def seed_documents(base: str, count: int, rng: random.Random) -> None:
     else:
         raise SystemExit("Extraction did not finish.")
     proposed = [o["id"] for o in call(f"{base}/api/observations")["observations"] if o["verification_status"] == "proposed"]
-    for start in range(0, len(proposed), 500):
-        body = json.dumps({"ids": proposed[start : start + 500]}).encode()
-        call(f"{base}/api/observations/verify", body, {**CLIENT, "Content-Type": "application/json"})
+    for observation_id in proposed:
+        call(f"{base}/api/observations/{observation_id}/verify", b"{}", {**CLIENT, "Content-Type": "application/json"})
 
 
 def seed_manual_rows(data_dir: str, rows: int, rng: random.Random) -> None:

@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from .lab_catalog import CODE_SYSTEM, canonical_unit, find_test, normalize, parse_range, parse_value
+from .lab_catalog import BY_CODE, CATEGORIES, CODE_SYSTEM, canonical_unit, find_test, normalize, parse_range, parse_value
 from .models import (
     Confidence,
     Document,
@@ -22,6 +22,7 @@ from .models import (
     ObservationOrigin,
     ObservationRevision,
     ObservationVerification,
+    ReviewGroupApproval,
     RevisionAction,
 )
 from .storage import UploadRejected
@@ -108,8 +109,8 @@ def _snapshot(o: Observation) -> dict:
     return {k: (getattr(o, k).value if k == "verification_status" else getattr(o, k)) for k in _RECORDED}
 
 
-def _revise(session: Session, o: Observation, action: RevisionAction) -> None:
-    session.add(ObservationRevision(observation=o, action=action, values=_snapshot(o), occurred_at=_now()))
+def _revise(session: Session, o: Observation, action: RevisionAction, group_id: str | None = None, at: str | None = None) -> None:
+    session.add(ObservationRevision(observation=o, action=action, values=_snapshot(o), occurred_at=at or _now(), review_group_id=group_id))
 
 
 def add_extracted_rows(session: Session, document: Document, run_id: int, rows: list[dict]) -> None:
@@ -130,7 +131,7 @@ def add_extracted_rows(session: Session, document: Document, run_id: int, rows: 
             collected_on=row["collected"], reported_on=row["reported"],
             # A report date is when the result was documented. With none printed, that date stays unknown.
             documented_on=row["reported"], imported_at=document.imported_at,
-            source_page=row["page"], source_line=row["line"], source_text=row["source"], issues=row["issues"],
+            source_page=row["page"], source_line=row["line"], source_text=row["source"], source_section=row.get("section"), issues=row["issues"],
         )
         _derive(o)
         session.add(o)
@@ -206,6 +207,8 @@ def correct(sessions: sessionmaker[Session], observation_id: str, raw_fields: di
     if "value_text" in fields and not fields["value_text"]:
         raise _invalid("A value is required.")
     with sessions() as session:
+        # The lock comes before the read. Otherwise an approval landing in between would stand, over a value nobody saw.
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
         o = session.get(Observation, observation_id)
         if o is None:
             raise _not_found()
@@ -217,6 +220,7 @@ def correct(sessions: sessionmaker[Session], observation_id: str, raw_fields: di
         o.issues = _person_issues(o)
         o.confidence = None  # A person's value has no machine confidence.
         o.verification_status = ObservationVerification.PROPOSED
+        o.approved_group_id = None
         _revise(session, o, RevisionAction.CORRECTED)
         session.commit()
     log.info("measurement %s: corrected", observation_id)
@@ -230,8 +234,9 @@ _TRANSITIONS = {
 
 
 def set_status(sessions: sessionmaker[Session], observation_ids: list[str], action: RevisionAction) -> None:
-    """One transaction: approving a batch either all happens or none of it does."""
+    """A person deciding on individual results. Approving several together goes through approve_group."""
     with sessions() as session:
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
         found = session.scalars(select(Observation).where(Observation.id.in_(observation_ids))).all()
         if len(found) != len(set(observation_ids)):
             raise _not_found()
@@ -240,6 +245,132 @@ def set_status(sessions: sessionmaker[Session], observation_ids: list[str], acti
         for o in found:
             if o.verification_status is not _TRANSITIONS[action]:
                 o.verification_status = _TRANSITIONS[action]
+                o.approved_group_id = None
                 _revise(session, o, action)
         session.commit()
     log.info("%d measurements: %s", len(found), action.value)
+
+
+# ---- Review groups: a person checks a table of clean results against the original, then approves exactly that set.
+
+_CATEGORY_NAMES = {code: name for code, name, _short in CATEGORIES}
+
+
+@dataclass(frozen=True)
+class GroupInfo:
+    key: str | None
+    label: str
+    eligible: bool
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GroupItem:
+    id: str
+    version: int
+
+
+def _category(o: Observation) -> str:
+    test = BY_CODE.get(o.test_code or "")
+    return test.category if test else "other"
+
+
+def _group_key(o: Observation) -> str:
+    # Not a claim that this is one clinical panel: only one document, one collection and one kind of test.
+    return f"{o.collected_on or 'undated'}|{_category(o)}|{o.source_section or 0}"
+
+
+def _reasons(o: Observation, repeated: bool) -> list[str]:
+    """Why this result needs looking at alone. Empty means it is complete, so a person can check it in a table."""
+    reasons = list(o.issues or [])
+    if o.confidence is Confidence.LOW and not reasons:
+        reasons.append("The reader was not confident about this row.")
+    if not o.source_page:
+        reasons.append("It has no source line in this document to check it against.")
+    if not o.test_code:
+        reasons.append("This test is not in the known list.")
+    if o.value_number is None:
+        reasons.append("Its value is not one exact number.")
+    if not o.unit:
+        reasons.append("No unit is recorded.")
+    if not o.reference_text:
+        reasons.append("No reference range is recorded.")
+    if not o.collected_on:
+        reasons.append("No collection date is recorded.")
+    if repeated:
+        reasons.append("This test appears more than once for this date, which could mean separate collections.")
+    return list(dict.fromkeys(reasons))
+
+
+def review_groups(observations: list[Observation]) -> dict[str, GroupInfo]:
+    """Worked out each time from the results themselves, so nothing about a group can go out of date."""
+    per_test: dict[tuple, int] = {}
+    for o in observations:
+        if o.document_id and o.verification_status is not ObservationVerification.REJECTED and o.test_code:
+            test_key = (o.document_id, _group_key(o), o.test_code)
+            per_test[test_key] = per_test.get(test_key, 0) + 1
+    info: dict[str, GroupInfo] = {}
+    for o in observations:
+        if not o.document_id:
+            continue
+        key = _group_key(o)
+        reasons = _reasons(o, per_test.get((o.document_id, key, o.test_code), 0) > 1)
+        eligible = o.verification_status is ObservationVerification.PROPOSED and not reasons
+        info[o.id] = GroupInfo(key, _CATEGORY_NAMES.get(_category(o), "Other results"), eligible, tuple(reasons))
+    return info
+
+
+def version_of(o: Observation) -> int:
+    """Rises with every change, since every change appends a revision."""
+    return max((r.id for r in o.revisions), default=0)
+
+
+_CHANGED = "This group changed after it was shown, so nothing was approved. Check it again."
+
+
+def approve_group(sessions: sessionmaker[Session], document_id: str, group_key: str, collected_on: str | None, items: list[GroupItem]) -> str:
+    """Approves exactly the set shown, or nothing. Returns the approval's id.
+
+    The write lock is taken before anything is read, so nothing can change between the checks and the approval.
+    """
+    with sessions() as session:
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        found = list(session.scalars(select(Observation).options(selectinload(Observation.revisions)).where(Observation.document_id == document_id)))
+        info = review_groups(found)
+        current = {o.id: o for o in found if info[o.id].eligible and info[o.id].key == group_key}
+        wanted = {item.id: item.version for item in items}
+        if len(wanted) != len(items) or not items or set(wanted) != set(current) or any(version_of(current[i]) != v for i, v in wanted.items()) or any(o.collected_on != collected_on for o in current.values()):
+            raise UploadRejected(409, "group_changed", _CHANGED)
+        now = _now()
+        group = ReviewGroupApproval(document_id=document_id, group_key=group_key, collected_on=collected_on, result_count=len(current), approved_at=now)
+        session.add(group)
+        session.flush()
+        for o in current.values():
+            o.verification_status = ObservationVerification.VERIFIED
+            o.approved_group_id = group.id
+            _revise(session, o, RevisionAction.VERIFIED, group.id, now)
+        session.commit()
+        group_id = group.id
+    log.info("group approval %s: %d measurements", group_id, len(items))
+    return group_id
+
+
+def undo_group(sessions: sessionmaker[Session], group_id: str) -> int:
+    """Returns to review whatever that approval still accounts for. Results changed by hand since then stay as they are."""
+    with sessions() as session:
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        group = session.get(ReviewGroupApproval, group_id)
+        if group is None:
+            raise UploadRejected(404, "not_found", "No such group approval.")
+        if group.undone_at is not None:
+            raise UploadRejected(409, "group_undone", "This group approval was already undone.")
+        now = _now()
+        found = list(session.scalars(select(Observation).where(Observation.approved_group_id == group_id)))
+        for o in found:
+            o.verification_status = ObservationVerification.PROPOSED
+            o.approved_group_id = None
+            _revise(session, o, RevisionAction.REOPENED, group_id, now)
+        group.undone_at = now
+        session.commit()
+    log.info("group approval %s: undone, %d measurements back in review", group_id, len(found))
+    return len(found)

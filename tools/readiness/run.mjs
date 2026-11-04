@@ -344,7 +344,7 @@ try {
   section('Reviewing some results, so charts and history exist');
   const observations = (await api('/api/observations')).observations;
   const chosen = observations.filter((o) => o.test_code).slice(0, 60);
-  await post('/api/observations/verify', { ids: chosen.slice(0, 50).map((o) => o.id) });
+  for (const o of chosen.slice(0, 50)) await post(`/api/observations/${o.id}/verify`);
   await post(`/api/observations/${chosen[0].id}/correct`, { fields: { value_text: '13.9' } });
   await post(`/api/observations/${chosen[0].id}/verify`);
   await post(`/api/documents/${documents[0].id}/metadata/provider`, { action: 'corrected', value: 'Fictional Clinic' });
@@ -628,9 +628,11 @@ try {
   check('it holds every document and no sign-in details', restoredDb === `${(await api('/api/documents')).documents.length} 0 0 None`, restoredDb);
   check('a backup to a drive that is not connected is refused', cli('backup', '--to', path.join(root, 'Missing Drive', 'Backups')).status !== 0 && !fs.existsSync(path.join(root, 'Missing Drive')));
   const killMid = spawn(PY, ['-m', 'this_is_you', 'backup', '--to', drive], { cwd: REPO, env: serviceEnv(DATA, API), stdio: 'ignore' });
-  await sleep(1200);
+  // A fixed wait can outlast a small backup: the kill then tests nothing, and the exit has already fired.
+  const killed = new Promise((r) => killMid.on('exit', r));
+  await until('the backup to begin', () => fs.existsSync(path.join(DATA, 'backup-staging')), 30000, 20);
   killMid.kill('SIGKILL');
-  await new Promise((r) => killMid.on('exit', r));
+  await killed;
   const leftBehind = fs.readdirSync(drive).filter((n) => n !== sealedName);
   check('killing a sealed backup leaves nothing that can pass as finished', leftBehind.every((n) => n.endsWith('.incomplete')), leftBehind.join(', '));
   await crash();

@@ -65,11 +65,11 @@ def test_birth_date_and_report_date_are_never_the_service_date():
     assert not any(p.field == "service_date" for p in propose_all([(1, "Reported: 2024-03-14\nSome fictional words here.")], None, TODAY))
 
 
-def test_ambiguous_numeric_date_is_low_confidence_and_says_why():
+def test_a_numeric_date_is_read_month_first_with_no_doubt():
     found = {p.field: p for p in propose_all([(1, "\n".join(pdfs.AMBIGUOUS_DATE))], None, TODAY)}["service_date"]
     assert found.value == "2020-03-11"
-    assert found.confidence == "low"
-    assert "2020-11-03" in found.reason
+    assert found.confidence != "low"
+    assert "2020-11-03" not in found.reason
 
 
 def test_unambiguous_numeric_date_is_not_flagged():

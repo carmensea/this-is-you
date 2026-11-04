@@ -68,6 +68,7 @@ def _clean_lab_row(raw: dict) -> dict | None:
         "name": name, "value": value, "unit": _text(raw.get("unit"), 40), "reference": _text(raw.get("reference"), 60), "flag": _text(raw.get("flag"), 12),
         "collected": _text(raw.get("collected"), 10), "reported": _text(raw.get("reported"), 10), "page": raw["page"], "line": raw["line"], "source": _text(raw.get("source"), 200) or "",
         "confidence": raw["confidence"], "issues": [str(i)[:200] for i in issues][:6] if isinstance(issues, list) else [],
+        "section": raw["section"] if isinstance(raw.get("section"), int) else 0,
     }
 
 

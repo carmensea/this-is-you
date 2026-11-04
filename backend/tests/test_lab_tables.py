@@ -310,9 +310,9 @@ def test_a_row_with_no_value_cannot_be_approved_until_it_has_one(client):
     observations = {o["reported_name"]: o for o in client.get("/api/observations").json()["observations"]}
     hgb = observations["Hemoglobin"]
     assert hgb["value_text"] == "" and hgb["verification_status"] == "proposed"
-    assert client.post("/api/observations/verify", json={"ids": [hgb["id"]]}, headers=CLIENT_HEADERS).status_code == 422
+    assert client.post(f"/api/observations/{hgb['id']}/verify", headers=CLIENT_HEADERS).status_code == 422
     assert client.post(f"/api/observations/{hgb['id']}/correct", json={"fields": {"value_text": "13.9", "unit": "g/dL"}}, headers=CLIENT_HEADERS).status_code == 200
-    assert client.post("/api/observations/verify", json={"ids": [hgb["id"]]}, headers=CLIENT_HEADERS).status_code == 200
+    assert client.post(f"/api/observations/{hgb['id']}/verify", headers=CLIENT_HEADERS).status_code == 200
 
 
 def test_reading_again_with_new_line_numbers_does_not_double_results(data_dir, tmp_path):
@@ -336,3 +336,60 @@ def test_a_table_heading_is_not_proposed_as_the_report_title(tmp_path, heading):
     path.write_bytes(pdfs.text_pdf(["Fictional Family Health Portal", "CBC with Differential Panel", heading, "Collected on Mar 5, 2024", "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL"]))
     titles = [p["value"] for p in extract(path, Limits(), TODAY).proposals if p["field"] == "report_title"]
     assert titles == ["CBC with Differential Panel"]
+
+
+# ---- Confidence follows what is left once the date is known. Results first, date after, as many reports print them.
+
+LATE_DATE = ["Collected on Mar 5, 2024 9:12 AM", "Result Date: Mar 6, 2024"]
+
+
+def test_a_date_before_the_table_leaves_a_clean_row_high():
+    row = by_name(["Collected on Mar 5, 2024 9:12 AM", *TABLE_HEAD, "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL"])["WBC"]
+    assert (row.confidence, row.issues, row.collected) == ("high", [], "2024-03-05")
+
+
+def test_a_date_after_the_table_clears_its_warning_and_its_penalty():
+    row = by_name([*TABLE_HEAD, "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL", *LATE_DATE])["WBC"]
+    assert (row.confidence, row.issues, row.collected) == ("high", [], "2024-03-05")
+
+
+def test_a_late_date_gives_back_only_the_confidence_the_row_had():
+    row = by_name([*TABLE_HEAD, "WBC 6.2 x10E3/uL", *LATE_DATE])["WBC"]
+    assert (row.confidence, row.issues) == ("medium", [])
+
+
+def test_a_late_date_replaces_a_date_of_service_too():
+    row = by_name(["Date of Service: Mar 1, 2024", *TABLE_HEAD, "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL", *LATE_DATE])["WBC"]
+    assert (row.confidence, row.issues, row.collected) == ("high", [], "2024-03-05")
+
+
+@pytest.mark.parametrize("line, kept", [
+    ("WBC 6.2", "No unit was printed"),
+    ("WBC 6.2 mg/dL 3.4 - 10.8 mg/dL", "unusual"),
+    ("Fictional Marker Alpha 12 x10E3/uL 3.4 - 10.8 x10E3/uL", "not in the known list"),
+])
+def test_a_late_date_leaves_other_warnings_and_their_penalty(line, kept):
+    found = rows([*TABLE_HEAD, line, *LATE_DATE])
+    assert len(found) == 1
+    assert found[0].confidence == "low" and found[0].collected == "2024-03-05"
+    assert any(kept in i for i in found[0].issues) and not any("No collection date" in i for i in found[0].issues)
+
+
+def test_several_warnings_lose_only_the_date_one():
+    row = by_name([*TABLE_HEAD, "WBC 6.2 7.1 x10E3/uL 3.4 - 10.8 mg/dL", *LATE_DATE])["WBC"]
+    assert row.confidence == "low" and len(row.issues) >= 2 and not any("No collection date" in i for i in row.issues)
+
+
+def test_a_late_date_with_its_own_doubt_stays_low():
+    row = by_name([*TABLE_HEAD, "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL", "Collected on 03/05/24"])["WBC"]
+    assert row.confidence == "low" and row.collected and row.issues and not any("No collection date" in i for i in row.issues)
+
+
+def test_a_service_date_with_a_doubt_keeps_it_when_a_late_date_arrives():
+    row = by_name(["Date of Service: 03/01/24", *TABLE_HEAD, "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL", *LATE_DATE])["WBC"]
+    assert row.confidence == "low" and row.issues
+
+
+def test_two_late_dates_leave_the_row_undated_and_low():
+    row = by_name([*TABLE_HEAD, "WBC 6.2 x10E3/uL 3.4 - 10.8 x10E3/uL", "Collected on Mar 5, 2024", "Collected on Apr 9, 2024"])["WBC"]
+    assert row.confidence == "low" and row.collected is None and any("No collection date" in i for i in row.issues)

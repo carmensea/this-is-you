@@ -51,7 +51,8 @@ function backendWith(answer: Answer = { state: 'stored' }, documents = [toArchiv
     listObservations: vi.fn(async () => []),
     correctObservation: vi.fn(),
     setObservationStatus: vi.fn(),
-    verifyObservations: vi.fn(),
+    approveGroup: vi.fn(),
+    undoGroup: vi.fn(),
     createObservation: vi.fn(),
   };
 }
@@ -105,15 +106,15 @@ describe('real documents on the Documents screen', () => {
   it('shows the original file, and claims nothing unknown about it', () => {
     const { container } = mount();
     expect(screen.getAllByText('blood work 2024.pdf').length).toBeGreaterThan(0);
-    const frame = container.querySelector('iframe')!;
-    expect(frame.getAttribute('src')).toBe(dto().content_url);
+    expect(container.querySelector('[aria-label^="Original file"]')!.getAttribute('data-file')).toBe(dto().content_url);
     expect(container.textContent).toContain('b'.repeat(64));
     expect(container.textContent).toContain('Date of serviceProposed: 11 March 2024 (low confidence, not verified)');
     expect(container.textContent).toContain('ProviderNot recorded');
     expect(container.textContent).toContain('VerificationNot verified');
     expect(container.textContent).toContain('ReviewNot started');
     expect(container.textContent).toContain('ReadingText read');
-    expect(screen.getByText('Open original in a new tab').getAttribute('href')).toBe(dto().content_url);
+    expect(screen.queryByText('Open original in a new tab')).toBeNull();
+    expect(container.querySelector('a[target="_blank"]')).toBeNull();
     expect(screen.getByText('Download original').getAttribute('href')).toBe(`${dto().content_url}?download=true`);
   });
   it('does not offer review while a file is still being read', () => {
@@ -146,10 +147,6 @@ describe('address bar', () => {
     expect(viewFromHash('#/compare')).toBe('compare');
     expect(viewFromHash('')).toBeNull();
     expect(viewFromHash('#/../../etc')).toBeNull();
-  });
-  it('loads a PDF only when it is scrolled into view', () => {
-    const { container } = mount();
-    expect(container.querySelector('iframe')!.getAttribute('loading')).toBe('lazy');
   });
   it('opens the screen named in the address, so a reload stays put', () => {
     window.location.hash = '/import';
@@ -204,7 +201,7 @@ describe('inferred details never pass as verified', () => {
     for (const [status, text] of [['image_only', 'Image-only PDF'], ['encrypted', 'password protected'], ['too_complex', 'safety limits']] as const) {
       const { container, unmount } = mount({}, [dto({ extraction_status: status, metadata: { document_type: field('missing'), service_date: field('missing'), provider: field('missing'), report_title: field('missing') } })]);
       expect(container.textContent).toContain(text);
-      expect(container.querySelector('iframe')).not.toBeNull();
+      expect(container.querySelector('[aria-label^="Original file"]')).not.toBeNull();
       unmount();
     }
   });
@@ -226,13 +223,13 @@ describe('the review workflow', () => {
     expect(container.textContent).toContain('Proposed, not verified · low confidence');
     expect(container.textContent).toContain('The numbers could be read two ways.');
     expect(container.textContent).toContain('Source, page 2: "Date of Service: 03/11/2024" · rules-v1');
-    expect(container.querySelector('iframe')!.getAttribute('src')).toBe(dto().content_url);
+    expect(container.querySelector('[aria-label^="Original file"]')!.getAttribute('data-file')).toBe(dto().content_url);
     expect(container.textContent).not.toContain('SYNTHETIC SAMPLE RECORD');
   });
   it('follows a proposal back to its page in the original', () => {
     const { container } = open();
     fireEvent.click(screen.getByText('Show page 2'));
-    expect(container.querySelector('iframe')!.getAttribute('src')).toBe(`${dto().content_url}#page=2`);
+    expect(container.querySelector('[aria-label^="Original file"]')!.getAttribute('data-page')).toBe('2');
   });
   it('sends the exact proposal a person confirmed', async () => {
     const { backend } = open();
