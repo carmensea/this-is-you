@@ -223,12 +223,16 @@ _EXPLICIT_TITLE = re.compile(r"\b(laboratory|lab|radiology|imaging|pathology|ope
 _LOOKS_LIKE_FIELD = re.compile(r":|\b(page \d|patient)\b", re.I)
 
 
+# The heading of a results table says nothing about what the document is.
+_TABLE_HEADING = re.compile(r"^(component|test)?\s*(results?|report)$", re.I)
+
+
 def propose_title(lines: list[Line], embedded_title: str | None, today: date) -> Proposal | None:
     for line in lines:
         if line.page != 1 or line.index >= HEAD_LINES:
             break
         text = line.text
-        if len(text) > 90 or _LOOKS_LIKE_FIELD.search(text) or find_dates(text, today) or not _TITLE_WORD.search(text):
+        if len(text) > 90 or _LOOKS_LIKE_FIELD.search(text) or find_dates(text, today) or not _TITLE_WORD.search(text) or _TABLE_HEADING.match(text):
             continue
         if _EXPLICIT_TITLE.search(text):
             return Proposal("report_title", text, HIGH, "A heading near the top of the first page.", 1, text[:MAX_SNIPPET])

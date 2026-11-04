@@ -78,7 +78,7 @@ def clean_fields(fields: dict) -> dict:
 
 def _derive(o: Observation) -> None:
     """Everything calculated from what is printed. Recalculated on each change, never edited directly."""
-    test = find_test(o.reported_name)
+    test = find_test(o.reported_name, o.unit)
     o.test_code, o.code_system = (test.code, CODE_SYSTEM) if test else (None, None)
     o.value_number = parse_value(o.value_text)
     o.reference_low, o.reference_high = parse_range(o.reference_text)
@@ -88,7 +88,7 @@ def _derive(o: Observation) -> None:
 def _person_issues(o: Observation) -> list[str]:
     """What still deserves a look after a person has edited a row."""
     issues = []
-    test = find_test(o.reported_name)
+    test = find_test(o.reported_name, o.unit)
     if not o.unit:
         issues.append("No unit recorded.")
     elif test and canonical_unit(o.unit) not in test.expected_units:
@@ -115,9 +115,11 @@ def _revise(session: Session, o: Observation, action: RevisionAction) -> None:
 def add_extracted_rows(session: Session, document: Document, run_id: int, rows: list[dict]) -> None:
     """Adds what a reading found. Rows already known stay as they are, including rejected ones."""
     existing = session.scalars(select(Observation).where(Observation.document_id == document.id, Observation.origin == ObservationOrigin.EXTRACTED)).all()
-    seen = {(o.revisions[0].values["reported_name"], o.revisions[0].values["value_text"], o.source_page, o.source_line) for o in existing if o.revisions}
+    # Without the line: a newer reading can number the lines of a page differently, and the same result should not appear twice.
+    known = {(o.revisions[0].values["reported_name"], o.revisions[0].values["value_text"], o.source_page) for o in existing if o.revisions}
+    seen = set()
     for row in rows:
-        if (row["name"], row["value"], row["page"], row["line"]) in seen:
+        if (row["name"], row["value"], row["page"]) in known or (row["name"], row["value"], row["page"], row["line"]) in seen:
             continue
         seen.add((row["name"], row["value"], row["page"], row["line"]))
         o = Observation(
@@ -233,6 +235,8 @@ def set_status(sessions: sessionmaker[Session], observation_ids: list[str], acti
         found = session.scalars(select(Observation).where(Observation.id.in_(observation_ids))).all()
         if len(found) != len(set(observation_ids)):
             raise _not_found()
+        if action is RevisionAction.VERIFIED and any(not o.value_text for o in found):
+            raise _invalid("One of these has no value yet. Enter it from the original before approving.")
         for o in found:
             if o.verification_status is not _TRANSITIONS[action]:
                 o.verification_status = _TRANSITIONS[action]

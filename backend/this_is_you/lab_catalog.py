@@ -22,6 +22,18 @@ _SPELLINGS = {
     "miu/l": "mIU/L", "mu/l": "mIU/L", "uiu/ml": "mIU/L", "µiu/ml": "mIU/L", "miu/ml": "mIU/mL",
     "ml/min/1.73m2": "mL/min/1.73m²", "ml/min/1.73m²": "mL/min/1.73m²", "ml/min/1.73": "mL/min/1.73m²", "ml/min": "mL/min",
 }
+# The same few units are written many ways in blood counts. "uL", "mcL" and "µL" are one volume, in either micro sign.
+BILLIONS_PER_L, TRILLIONS_PER_L, CELLS = "×10⁹/L", "×10¹²/L", "cells/µL"
+_MICROLITRE = ("/ul", "/µl", "/μl", "/mcl")
+for _prefix in ("x10e3", "x10^3", "10^3", "10*3", "10e3", "x103", "x10(3)", "10(3)", "x10*3", "k", "thou", "thousand", "tho"):
+    _SPELLINGS.update({_prefix + _volume: THOUSANDS for _volume in _MICROLITRE})
+for _prefix in ("x10e6", "x10^6", "10^6", "10*6", "10e6", "x106", "x10(6)", "10(6)", "x10*6", "m", "mil", "mill", "million"):
+    _SPELLINGS.update({_prefix + _volume: MILLIONS for _volume in _MICROLITRE})
+_SPELLINGS.update({_prefix + "/l": BILLIONS_PER_L for _prefix in ("x10e9", "x10^9", "10^9", "10*9", "10e9", "x109", "x10(9)", "x10*9")})
+_SPELLINGS.update({_prefix + "/l": TRILLIONS_PER_L for _prefix in ("x10e12", "x10^12", "10^12", "10*12", "10e12", "x1012", "x10(12)", "x10*12")})
+_SPELLINGS.update({"cells" + _volume: CELLS for _volume in _MICROLITRE})
+_SPELLINGS.update({_volume: CELLS for _volume in _MICROLITRE})
+_SPELLINGS.update({"gm/dl": "g/dL", "/100 wbc": "/100 WBC", "/100wbc": "/100 WBC", "%wbc": "%"})
 UNIT_WORDS = frozenset(_SPELLINGS)
 
 
@@ -51,18 +63,37 @@ def _t(code, category, name, short, unit, names, conversions=None, also=(), grou
     return LabTest(code, category, name, short, unit, tuple(names), conversions, (unit, *conversions, *also), group)
 
 
+def _differential(code: str, name: str, spellings: list[str], *absolute_names: str) -> tuple[LabTest, LabTest]:
+    """A white cell type as a share of the count, and as a count. Different tests, with very different numbers."""
+    percent = [f"{word} %" for word in spellings] + [f"{word}%" for word in spellings] + [f"% {word}" for word in spellings] + [f"{word} percent" for word in spellings] + [f"{word}, %" for word in spellings] + [f"{word} (%)" for word in spellings]
+    count = [form for word in spellings for form in (f"absolute {word}", f"{word} absolute", f"{word}, absolute", f"{word} (absolute)", f"abs {word}", f"{word} abs", f"{word}, abs", f"{word} #", f"{word}#", f"{word} (abs)")]
+    return (
+        _t(f"{code}_pct", "cbc", f"{name}, percent", f"{name} %", "%", percent),
+        _t(f"{code}_abs", "cbc", f"{name}, absolute", f"{name} abs.", THOUSANDS, [*count, *absolute_names], {BILLIONS_PER_L: 1.0, CELLS: 0.001}),
+    )
+
+
 CATEGORIES = [("cbc", "Complete blood count", "CBC"), ("cmp", "Metabolic panel", "metabolic"), ("lipid", "Lipid panel", "lipids"), ("thyroid", "Thyroid function", "thyroid"), ("other", "Other results", "other")]
 
 TESTS: tuple[LabTest, ...] = (
-    _t("wbc", "cbc", "White blood cell count", "WBC", THOUSANDS, ["wbc", "white blood cell count", "white blood cells", "white blood cell", "leukocytes", "wbc count"]),
-    _t("rbc", "cbc", "Red blood cell count", "RBC", MILLIONS, ["rbc", "red blood cell count", "red blood cells", "red blood cell", "erythrocytes", "rbc count"]),
+    _t("wbc", "cbc", "White blood cell count", "WBC", THOUSANDS, ["wbc", "white blood cell count", "white blood cells", "white blood cell", "leukocytes", "wbc count", "leukocyte count"], {BILLIONS_PER_L: 1.0}),
+    _t("rbc", "cbc", "Red blood cell count", "RBC", MILLIONS, ["rbc", "red blood cell count", "red blood cells", "red blood cell", "erythrocytes", "rbc count", "erythrocyte count"], {TRILLIONS_PER_L: 1.0}),
     _t("hgb", "cbc", "Hemoglobin", "Hemoglobin", "g/dL", ["hemoglobin", "hgb", "hb", "haemoglobin"], {"g/L": 0.1}),
     _t("hct", "cbc", "Hematocrit", "Hematocrit", "%", ["hematocrit", "hct", "haematocrit"]),
-    _t("mcv", "cbc", "Mean corpuscular volume", "MCV", "fL", ["mcv", "mean corpuscular volume"]),
-    _t("mch", "cbc", "Mean corpuscular hemoglobin", "MCH", "pg", ["mch", "mean corpuscular hemoglobin"]),
-    _t("mchc", "cbc", "Mean corpuscular hemoglobin concentration", "MCHC", "g/dL", ["mchc", "mean corpuscular hemoglobin concentration"], {"g/L": 0.1}),
-    _t("rdw", "cbc", "Red cell distribution width", "RDW", "%", ["rdw", "red cell distribution width", "rdw-cv"]),
-    _t("plt", "cbc", "Platelet count", "Platelets", THOUSANDS, ["platelets", "platelet count", "plt", "platelet"]),
+    _t("mcv", "cbc", "Mean corpuscular volume", "MCV", "fL", ["mcv", "mean corpuscular volume", "mean cell volume"]),
+    _t("mch", "cbc", "Mean corpuscular hemoglobin", "MCH", "pg", ["mch", "mean corpuscular hemoglobin", "mean cell hemoglobin"]),
+    _t("mchc", "cbc", "Mean corpuscular hemoglobin concentration", "MCHC", "g/dL", ["mchc", "mean corpuscular hemoglobin concentration", "mean cell hemoglobin concentration"], {"g/L": 0.1}),
+    _t("rdw", "cbc", "Red cell distribution width", "RDW", "%", ["rdw", "red cell distribution width", "rdw-cv", "rdw cv", "rbc distribution width"]),
+    _t("rdwsd", "cbc", "Red cell distribution width, SD", "RDW-SD", "fL", ["rdw-sd", "rdw sd"]),
+    _t("plt", "cbc", "Platelet count", "Platelets", THOUSANDS, ["platelets", "platelet count", "plt", "platelet"], {BILLIONS_PER_L: 1.0}),
+    _t("mpv", "cbc", "Mean platelet volume", "MPV", "fL", ["mpv", "mean platelet volume"]),
+    *_differential("neut", "Neutrophils", ["neutrophils", "neutrophil", "neut", "neuts", "segs", "segmented neutrophils", "seg neutrophils", "polys"], "anc", "absolute neutrophil count"),
+    *_differential("lymph", "Lymphocytes", ["lymphocytes", "lymphocyte", "lymph", "lymphs"], "alc", "absolute lymphocyte count"),
+    *_differential("mono", "Monocytes", ["monocytes", "monocyte", "mono", "monos"], "amc", "absolute monocyte count"),
+    *_differential("eos", "Eosinophils", ["eosinophils", "eosinophil", "eos", "eosin"], "aec", "absolute eosinophil count"),
+    *_differential("baso", "Basophils", ["basophils", "basophil", "baso", "basos"], "abc", "absolute basophil count"),
+    *_differential("ig", "Immature granulocytes", ["immature granulocytes", "immature granulocyte", "imm granulocytes", "immature grans", "ig"]),
+    _t("nrbc", "cbc", "Nucleated red blood cells", "nRBC", "/100 WBC", ["nrbc", "nucleated rbc", "nucleated red blood cells", "nucleated rbcs"], also=("%",)),
     _t("glu", "cmp", "Glucose", "Glucose", "mg/dL", ["glucose", "glucose, fasting", "fasting glucose", "glucose, serum", "glucose fasting", "glu"], {"mmol/L": 18.016}),
     _t("bun", "cmp", "Blood urea nitrogen", "BUN", "mg/dL", ["bun", "blood urea nitrogen", "urea nitrogen", "urea nitrogen (bun)"], {"mmol/L": 2.801}),
     _t("creat", "cmp", "Creatinine", "Creatinine", "mg/dL", ["creatinine", "creatinine, serum", "creat"], {"µmol/L": 1 / 88.4}),
@@ -92,22 +123,45 @@ TESTS: tuple[LabTest, ...] = (
 )
 _BY_NAME = {name: test for test in TESTS for name in test.names}
 BY_CODE = {test.code: test for test in TESTS}
-_MAX_NAME_WORDS = max(len(name.split()) for name in _BY_NAME)
+# A bare "Neutrophils" could be a percentage or a count. Only the unit printed beside it says which, so with no unit it stays unknown.
+_NEEDS_UNIT = {
+    word: {"%": BY_CODE[f"{code}_pct"], THOUSANDS: BY_CODE[f"{code}_abs"], BILLIONS_PER_L: BY_CODE[f"{code}_abs"], CELLS: BY_CODE[f"{code}_abs"]}
+    for code, words in (
+        ("neut", ("neutrophils", "neutrophil", "neut", "neuts", "segs", "segmented neutrophils", "seg neutrophils", "polys")),
+        ("lymph", ("lymphocytes", "lymphocyte", "lymph", "lymphs")),
+        ("mono", ("monocytes", "monocyte", "mono", "monos")),
+        ("eos", ("eosinophils", "eosinophil", "eos", "eosin")),
+        ("baso", ("basophils", "basophil", "baso", "basos")),
+        ("ig", ("immature granulocytes", "immature granulocyte", "imm granulocytes", "immature grans", "ig")),
+    )
+    for word in words
+}
+_MAX_NAME_WORDS = max(len(name.split()) for name in (*_BY_NAME, *_NEEDS_UNIT))
 
 
 def _key(name: str) -> str:
     return " ".join(name.lower().replace("(", "(").split()).strip(" .:;*")
 
 
-def find_test(name: str | None) -> LabTest | None:
+def find_test(name: str | None, unit: str | None = None) -> LabTest | None:
     """An exact match on a known name. Similar-looking names are not matched: HbA1c is not hemoglobin."""
-    return _BY_NAME.get(_key(name)) if name else None
+    if not name:
+        return None
+    key = _key(name)
+    if key in _NEEDS_UNIT:
+        return _NEEDS_UNIT[key].get(canonical_unit(unit) or "")
+    return _BY_NAME.get(key)
+
+
+def needs_unit(name: str) -> bool:
+    return _key(name) in _NEEDS_UNIT
 
 
 def longest_known_prefix(words: list[str]) -> int:
     """How many leading words form a known test name, or 0."""
     for count in range(min(_MAX_NAME_WORDS, len(words)), 0, -1):
-        if _key(" ".join(words[:count])) in _BY_NAME:
+        key = _key(" ".join(words[:count]))
+        if key in _BY_NAME or key in _NEEDS_UNIT:
             return count
     return 0
 

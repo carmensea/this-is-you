@@ -59,9 +59,11 @@ def _clean_lab_row(raw: dict) -> dict | None:
     if not isinstance(raw, dict) or raw.get("confidence") not in _CONFIDENCE or not isinstance(raw.get("page"), int) or not isinstance(raw.get("line"), int):
         return None
     name, value = _text(raw.get("name"), 200), _text(raw.get("value"), 60)
-    if not name or not value:
-        return None
     issues = raw.get("issues")
+    # A row with no value is only ever one the parser says it could not finish, for a person to complete.
+    if not name or (not value and not (isinstance(issues, list) and issues)):
+        return None
+    value = value or ""
     return {
         "name": name, "value": value, "unit": _text(raw.get("unit"), 40), "reference": _text(raw.get("reference"), 60), "flag": _text(raw.get("flag"), 12),
         "collected": _text(raw.get("collected"), 10), "reported": _text(raw.get("reported"), 10), "page": raw["page"], "line": raw["line"], "source": _text(raw.get("source"), 200) or "",

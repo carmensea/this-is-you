@@ -163,6 +163,8 @@ Each document has three separate statuses:
 
 **What is recognized.** Rows from text-based PDFs for complete blood counts, metabolic panels, lipid panels and thyroid tests, in common layouts: test name, value, unit, reference range and flag, in any of the usual column orders. Rules are fixed and local. Other tests are proposed only when a row has a name, value, unit and range together, and they are marked for a closer look. Anything else is left alone, and the document stays reviewable with results added by hand.
 
+**Result tables.** Differentials and blood count unit spellings such as `10*3/uL` and `K/mcL` are included. Tables headed "Your Value", "Standard Range" or "Component Results" are read whether each row is on one line, each cell is on its own line, or a label sits beside each value, and they can continue across pages. Only cells that follow one another under one test name are joined, so a page where all names come before all values is not paired up by counting. A row that could only be partly read is still listed, with what is uncertain, and one with no value cannot be approved until you enter it. These layouts were built from fictional examples of the general format, so a real report may still differ.
+
 **What is never made up.** A missing unit stays missing. A flag is only what the laboratory printed, and is never worked out from the range. Values are kept exactly as printed, so 14.20 stays 14.20.
 
 **Four separate dates.** Each result keeps these apart, and none stands in for another:
