@@ -63,7 +63,7 @@ function describe(item: ImportReportItem) {
                   ? 'Stored, no text found'
                   : 'Stored, reading failed';
   const color = item.review_status === 'completed' ? C.green : unread || reading === 'image_only' || reading === 'encrypted' || reading === 'no_text' ? C.rust : reading === 'pending' || reading === 'running' ? C.ink2 : C.amber;
-  return { label, color, result: `Stored unchanged. ${partial} ${verification}` };
+  return { label, color, result: `${item.message ? `${item.message} ` : ''}Stored unchanged. ${partial} ${verification}` };
 }
 
 const receivedCount = (b: ImportBatchSummary) => b.total - (b.counts.waiting ?? 0);

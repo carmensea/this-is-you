@@ -141,7 +141,7 @@ def test_a_crash_between_file_and_record_loses_nothing_on_retry(data_dir, monkey
     assert summary(client, batch)["counts"] == {"waiting": 1}
     # The file is recovered on start. Sending it again finishes the report and gives it back its name.
     assert [d["original_filename"][:15] for d in client.get("/api/documents").json()["documents"]] == ["Recovered file "]
-    assert send(client, batch, item, files["Records/a.pdf"]).json()["state"] == "duplicate"
+    assert send(client, batch, item, files["Records/a.pdf"]).json()["state"] == "stored"
     assert [d["original_filename"] for d in client.get("/api/documents").json()["documents"]] == ["a.pdf"]
 
 

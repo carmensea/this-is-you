@@ -416,7 +416,8 @@ def test_a_retried_file_gives_a_recovered_document_its_name_back(data_dir):
     body = make_pdf("Fictional named")
     _orphan(data_dir, body)
     client = client_for(data_dir)
-    assert upload(client, body, "Fictional report.pdf").json()["duplicate"] is True
+    assert upload(client, body, "Fictional report.pdf").json()["duplicate"] is False
+    assert upload(client, body, "Fictional copy.pdf").json()["duplicate"] is True
     documents = client.get("/api/documents").json()["documents"]
     assert [d["original_filename"] for d in documents] == ["Fictional report.pdf"]
 

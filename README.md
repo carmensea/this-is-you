@@ -44,6 +44,7 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 | `npm run perf:compare -- <old dist> <new dist>` | Alternates two builds to judge a change, about 15 minutes |
 | `npm run deploy:https-flow` | The app in production mode in Chrome, through an HTTPS proxy like `tailscale serve`, on a fictional archive |
 | `deploy/test/verify-vm.sh PHASE` | The Compose deployment on a real Linux machine, with attacks and crashes. **Wipes `/srv/this-is-you`: throwaway machines only.** |
+| `npm run readiness:recovery` | An import killed between saving a file and recording it, in Chrome, on a fictional archive: restarts, resuming, and the report against Documents |
 | `npm run readiness:review` | Group review in Chrome on a fictional archive: corrections, stale groups, approval, undo and real restarts |
 | `npm run readiness:dev` | Sign in, import and sign out through the real dev server, on a fictional archive. About 1 minute. |
 | `npm run readiness -- [--scale 1]` | The whole import, crash, backup and restore workflow in Chrome, on a messy fictional folder. About 4 minutes at scale 1. Needs a prior build. |

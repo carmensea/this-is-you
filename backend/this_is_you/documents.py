@@ -18,6 +18,12 @@ log = logging.getLogger("this_is_you.documents")
 
 PDF_MEDIA_TYPE = "application/pdf"
 RECOVERED_PREFIX = "Recovered file "
+RECOVERED_NOTE = "Recovered after an interrupted import. The stored file matched this one exactly."
+
+
+def recovered_name(sha256: str) -> str:
+    """The name recovery gives a file. Holding it means the upload it came from has not come back yet."""
+    return f"{RECOVERED_PREFIX}{sha256[:12]}.pdf"
 
 
 def utc_now() -> str:
@@ -42,31 +48,36 @@ def clean_filename(header_value: str | None) -> str:
     return name
 
 
-def _settle_item(session: Session, item_id: int | None, document: Document, duplicate: bool, now: str) -> None:
+def _settle_item(session: Session, item_id: int | None, document: Document, duplicate: bool, now: str, message: str | None = None) -> None:
     if item_id is None:
         return
     item = session.get(ImportItem, item_id)
     assert item is not None
-    item.state, item.document, item.message, item.updated_at = (ImportItemState.DUPLICATE if duplicate else ImportItemState.STORED), document, None, now
+    item.state, item.document, item.message, item.updated_at = (ImportItemState.DUPLICATE if duplicate else ImportItemState.STORED), document, message, now
 
 
 def record_upload(sessions: sessionmaker[Session], store: OriginalStore, received: ReceivedFile, filename: str, item_id: int | None = None) -> tuple[Document, bool]:
     """Store the file and its metadata. Returns the document and whether it already existed.
 
     A batch item changes in the same transaction, so a crash cannot leave a document its report does not know.
+    A crash just before that transaction leaves a recovered document. The first upload of those bytes is the one that
+    was interrupted, so it takes the document as its own, and clearing the name means no later upload can.
     """
     key = store.commit(received)  # File first: a crash here leaves an unlisted file, never a broken listing.
     with sessions() as session:
+        # The write lock comes first, so two copies arriving together cannot both take a recovered document.
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
         document = session.scalar(select(Document).where(Document.sha256 == received.sha256))
-        duplicate = document is not None
+        recovered = document is not None and document.original_filename == recovered_name(received.sha256)
+        duplicate = document is not None and not recovered
         now = utc_now()
-        if document is not None and document.original_filename.startswith(RECOVERED_PREFIX):
+        if recovered:
             document.original_filename = filename  # The name was lost in a crash, and this upload knows it.
         if document is None:
             document = Document(sha256=received.sha256, original_filename=filename, media_type=PDF_MEDIA_TYPE, byte_size=received.byte_size, storage_key=key, imported_at=now)
             session.add(document)
         session.add(ImportEvent(document=document, submitted_filename=filename, outcome=ImportOutcome.DUPLICATE if duplicate else ImportOutcome.STORED, occurred_at=now))
-        _settle_item(session, item_id, document, duplicate, now)
+        _settle_item(session, item_id, document, duplicate, now, RECOVERED_NOTE if recovered else None)
         try:
             session.commit()
         except IntegrityError:

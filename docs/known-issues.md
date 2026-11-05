@@ -1,26 +1,17 @@
 # Known issues
 
-## Priority: fix before more bulk imports
+## Fixed: a crash during upload left a recovered file and a wrong duplicate row
 
-### A crash during upload can leave a recovered file and a wrong duplicate row
+**Cause:** the original is saved before the database hears of it. A kill in between leaves a file with no record, which recovery rebuilds as a document, without knowing which import row it came from. When the file was sent again, a matching hash was the only test, so its row was marked `duplicate`.
 
-**Status:** open. Found on 2026-11-03 by `npm run readiness`, on fictional records. It appears only when the crash lands in a narrow window, so most runs pass.
+**Now:** a document named `Recovered file <the first 12 characters of its own hash>.pdf` is waiting for its upload. The first upload with those bytes takes it in one transaction: the row becomes `stored` with a note saying so, and the document gets its real name. That clears the name, so any later copy is a true duplicate. Nothing about the document is read again or changed apart from its name. `backend/tests/test_import_recovery.py` kills a real process at each stage, and `npm run readiness:recovery` does the same in Chrome.
 
-**What happens**
+### What this leaves
 
-1. The service saves an uploaded file to `originals`, and is killed before recording it in the database.
-2. On the next start, `reconcile` finds the file with no record and keeps it as a document named `Recovered file ...`. That document is linked to no import row.
-3. The person chooses the folder again, and the file is re-sent. Its hash matches the recovered document, so its row is marked `duplicate` instead of `stored`.
+- **Until the folder is chosen again,** Documents lists a `Recovered file` the report still shows as not received. The two agree once it comes back. If it never does, the document keeps that name.
+- **A new import can take it first.** If the same file is imported from a different folder before the first import resumes, the new report shows `stored`, and the old report shows `duplicate` when it resumes.
+- **Reports already affected stay as they are.** A row marked `duplicate` by the old behaviour is not rewritten.
 
-**Effect**
+### Design limit: the filename is the recovered-state marker
 
-- No file or record is lost, and the file is stored once.
-- The import report is off by one: stored one too low, duplicate one too high, and one more document than stored rows.
-- The document keeps the `Recovered file` name, not its real filename.
-- A person checking the report against their folder sees a duplicate that is not one.
-
-**Evidence from the failing run:** `71 rows, 72 documents` after the crash, then `category read: 349 of 350`, `category duplicate: 31 of 30`, and `stored originals match the source: 439 of 440`.
-
-**Where to look:** `upload_item` in `backend/this_is_you/api/imports.py`, `record_upload` in `backend/this_is_you/documents.py`, and `backend/this_is_you/reconcile.py`.
-
-**Done when:** a re-sent file whose only match is a recovered document with no import row is marked `stored`, takes the row's filename, and links to that document. A test covers it with a crash forced inside this window, and the readiness counts match.
+Whether a document is still waiting for its upload is worked out from its name alone, which is a stopgap to avoid a migration. A name is display text and should not carry state. Replace it with an explicit database state, such as a column on the document or a record of the upload before its file is saved. A record made before the save would also let recovery link the row straight away, which closes the temporary discrepancy above.

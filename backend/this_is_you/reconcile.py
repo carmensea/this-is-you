@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from .config import Settings
-from .documents import PDF_MEDIA_TYPE, RECOVERED_PREFIX, utc_now
+from .documents import PDF_MEDIA_TYPE, recovered_name, utc_now
 from .models import Document, ImportEvent, ImportOutcome
 
 log = logging.getLogger("this_is_you.reconcile")  # Counts only.
@@ -70,7 +70,7 @@ def reconcile(settings: Settings, sessions: sessionmaker) -> Reconciled:
                 continue
             path.chmod(0o400)
             now = utc_now()
-            filename = f"{RECOVERED_PREFIX}{match[3][:12]}.pdf"
+            filename = recovered_name(match[3])
             with sessions() as session:
                 document = Document(sha256=match[3], original_filename=filename, media_type=PDF_MEDIA_TYPE, byte_size=path.stat().st_size, storage_key=key, imported_at=now)
                 session.add_all([document, ImportEvent(document=document, submitted_filename=filename, outcome=ImportOutcome.STORED, occurred_at=now)])

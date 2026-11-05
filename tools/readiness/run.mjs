@@ -225,7 +225,9 @@ try {
   const docsAfterCrash = (await api('/api/documents')).documents.length;
   const items = await allItems(summary.id);
   const storedRows = items.filter((i) => i.state === 'stored').length;
-  check('after the crash, the report and the archive agree on what is stored', storedRows === docsAfterCrash, `${storedRows} rows, ${docsAfterCrash} documents`);
+  // A kill between saving a file and recording it leaves one recovered document, whose row waits for the file to return.
+  const { recovered: recoveredAtStart } = await api('/api/backups/archive-health');
+  check('after the crash, the report and the archive agree on what is stored', storedRows === docsAfterCrash - recoveredAtStart, `${storedRows} rows, ${docsAfterCrash} documents, ${recoveredAtStart} recovered`);
   check('after the crash, the report kept the whole listing', summary.total >= crashAt, summary.total);
   check('the page offers to continue', await page.getByText('Choose the same folder to continue').isVisible());
 
