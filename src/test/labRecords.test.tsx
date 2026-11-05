@@ -719,7 +719,7 @@ describe('the review table', () => {
     it('will not tick from the top a row whose line could not be shown', async () => {
       const { openPdf } = await import('../services/pdfViewer');
       const found = { left: 0.1, top: 0.2, right: 0.9, bottom: 0.22, valueLeft: 0.5 };
-      vi.mocked(openPdf).mockResolvedValueOnce({ pages: 2, ratio: () => 1.3, render: () => ({ done: Promise.resolve(), cancel: () => {} }), close: () => {}, findRow: async (_page, source) => (source.startsWith('WBC') ? found : null) });
+      vi.mocked(openPdf).mockResolvedValueOnce({ pages: 2, ratio: () => 1.3, render: () => ({ done: Promise.resolve(), cancel: () => {} }), lost: new Promise(() => {}), close: () => {}, findRow: async (_page, source) => (source.startsWith('WBC') ? found : null) });
       open([clean({ id: ids[0], reported_name: 'WBC', source_text: 'WBC 6.2' }), clean({ id: ids[1], reported_name: 'Hemoglobin', source_text: 'Hemoglobin 13.9' })]);
       fireEvent.click(await screen.findByRole('checkbox', { name: 'All 1 shown match the original' }));
       expect(screen.getByText(/could not be cut from page 2/)).toBeTruthy();

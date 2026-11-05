@@ -46,6 +46,7 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 | `deploy/test/verify-vm.sh PHASE` | The Compose deployment on a real Linux machine, with attacks and crashes. **Wipes `/srv/this-is-you`: throwaway machines only.** |
 | `npm run readiness:recovery` | An import killed between saving a file and recording it, in Chrome, on a fictional archive: restarts, resuming, and the report against Documents |
 | `npm run readiness:delete` | Deleting a document in Chrome on a fictional archive: asking first, what goes, what stays, and a restart |
+| `npm run readiness:worker` | The shared PDF worker in Chrome on fictional PDFs: rapid switching, cancelling, failed files, killed workers, slow files, Stop and worker lifetime. About 7 minutes. Needs a prior build. |
 | `npm run readiness:review` | Group review in Chrome on a fictional archive: corrections, stale groups, approval, undo and real restarts |
 | `npm run readiness:dev` | Sign in, import and sign out through the real dev server, on a fictional archive. About 1 minute. |
 | `npm run readiness -- [--scale 1]` | The whole import, crash, backup and restore workflow in Chrome, on a messy fictional folder. About 4 minutes at scale 1. Needs a prior build. |
@@ -195,6 +196,10 @@ Each document has three separate statuses:
 
 Originals are drawn on the page by pdf.js, on this computer. Hover over a page to magnify it, and click a page to enlarge it in the same tab. A file it cannot draw falls back to the browser's own viewer, and Download original always stays. Text in the drawn pages cannot be selected.
 
+A large scan can take minutes to draw, and waiting never cancels it. After 15 seconds a note says it is still working, with a Stop button that ends the work and opens the browser's own viewer. If the PDF worker ends, the browser's lock on it is released, so that is noticed in about two seconds and the file reopens by itself.
+
+A worker that hangs looks exactly like one that is busy, so a hung file waits until you press Stop or switch to another file. Locks need HTTPS or localhost. Without them, a worker silent for 10 minutes is ended instead.
+
 Numeric dates are read month first (03/11/2024 is 11 March), and this alone is not a reason for low confidence. A date that only works day first, such as 28/03/2024, is read that way. A two-digit year still gets a warning.
 
 In a review table, each row of the PDF is cut out and shown above what was read from it. Tick each row that matches, or use the box at the top to tick every row shown. Approve turns on when every row is ticked, and nothing is approved before that. A row that changes must be ticked again. A row that cannot be found for certain in the page's text says so, and the top box leaves it for you to check and tick yourself.
@@ -253,7 +258,7 @@ In a review table, each row of the PDF is cut out and shown above what was read 
 
 ## Performance
 
-Timings use fictional archives only, and any request to another host is blocked. `tools/perf/baselines/` holds full runs from before and after the first performance work. These were taken on one Mac, so use them as reference points. To judge a change, keep a copy of the old `dist/` and run `npm run perf:compare`: separate runs differ by 10 to 15 percent.
+Timings use fictional archives only, and any request to another host is blocked. `tools/perf/baselines/` holds full runs from before and after the first performance work. These were taken on one Mac, so use them as reference points. To judge a change, keep a copy of the old `dist/` and run `npm run perf:compare`: separate runs differ by 10 to 15 percent. `perf:compare` does not cover PDF previews. The `npm run perf` preview timing now waits for the page to be drawn, so results from before this are not comparable: older runs stopped at the browser viewer's frame or at an undrawn canvas.
 
 Medians from alternating loads with nothing cached, in ms, before and after that work:
 

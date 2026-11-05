@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
-import { openPdf, type PdfFile } from '../services/pdfViewer';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
+import { openPdf, stopPdfWorker, type PdfFile } from '../services/pdfViewer';
+import { WorkerLost } from '../services/pdfWorker';
 import { C } from '../theme';
 import { s } from './styles';
 
@@ -7,6 +8,7 @@ const LENS_SIZE = 240;
 const LENS_ZOOM = 2.5;
 const MAX_PIXEL_WIDTH = 3000;
 const NEAR = '800px';
+const SLOW_MS = 15_000;
 
 const canHover = () => window.matchMedia?.('(hover: hover)').matches ?? true;
 
@@ -30,10 +32,11 @@ interface PageProps {
   scroller: RefObject<HTMLDivElement | null>;
   lens: RefObject<HTMLCanvasElement | null>;
   onOpen?: (page: number) => void;
-  onFail: () => void;
+  onFail: (problem?: unknown) => void;
+  onDrawing?: (change: number) => void;
 }
 
-function Page({ pdf, page, width, title, scroller, lens, onOpen, onFail }: PageProps) {
+function Page({ pdf, page, width, title, scroller, lens, onOpen, onFail, onDrawing }: PageProps) {
   const holder = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const near = useNear(holder, scroller);
@@ -44,11 +47,14 @@ function Page({ pdf, page, width, title, scroller, lens, onOpen, onFail }: PageP
     const scale = (window.devicePixelRatio || 1) * (canHover() ? LENS_ZOOM : 1);
     const job = pdf.render(page, target, Math.min(Math.round(width * scale), MAX_PIXEL_WIDTH));
     job.done.catch(onFail);
+    onDrawing?.(1);
+    const finished = () => onDrawing?.(-1); // Every job settles, at the latest when its file closes.
+    job.done.then(finished, finished);
     return () => {
       job.cancel();
       target.width = 0; // Pages far from view give their memory back.
     };
-  }, [pdf, page, width, near, onFail]);
+  }, [pdf, page, width, near, onFail, onDrawing]);
 
   const hideLens = () => {
     if (lens.current) lens.current.style.display = 'none';
@@ -103,10 +109,11 @@ interface PagesProps {
   startPage: number | null;
   height: number | string;
   onOpen?: (page: number) => void;
-  onFail: () => void;
+  onFail: (problem?: unknown) => void;
+  onDrawing?: (change: number) => void;
 }
 
-function Pages({ pdf, title, startPage, height, onOpen, onFail }: PagesProps) {
+function Pages({ pdf, title, startPage, height, onOpen, onFail, onDrawing }: PagesProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const lens = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
@@ -132,7 +139,7 @@ function Pages({ pdf, title, startPage, height, onOpen, onFail }: PagesProps) {
     <div ref={scroller} style={{ position: 'relative', height, overflowY: 'auto', overflowX: 'hidden' }} onScroll={() => { if (lens.current) lens.current.style.display = 'none'; }}>
       {width > 0 &&
         Array.from({ length: pdf.pages }, (_, i) => (
-          <Page key={i + 1} pdf={pdf} page={i + 1} width={width} title={title} scroller={scroller} lens={lens} onOpen={onOpen} onFail={onFail} />
+          <Page key={i + 1} pdf={pdf} page={i + 1} width={width} title={title} scroller={scroller} lens={lens} onOpen={onOpen} onFail={onFail} onDrawing={onDrawing} />
         ))}
       <canvas
         ref={lens}
@@ -144,7 +151,7 @@ function Pages({ pdf, title, startPage, height, onOpen, onFail }: PagesProps) {
   );
 }
 
-export function PageModal({ pdf, title, page, onClose, onFail }: { pdf: PdfFile; title: string; page: number; onClose: () => void; onFail: () => void }) {
+export function PageModal({ pdf, title, page, onClose, onFail, onDrawing }: { pdf: PdfFile; title: string; page: number; onClose: () => void; onFail: (problem?: unknown) => void; onDrawing?: (change: number) => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const open = dialog.current;
@@ -166,41 +173,78 @@ export function PageModal({ pdf, title, page, onClose, onFail }: { pdf: PdfFile;
           </button>
         </div>
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Pages pdf={pdf} title={title} startPage={page} height="100%" onFail={onFail} />
+          <Pages pdf={pdf} title={title} startPage={page} height="100%" onFail={onFail} onDrawing={onDrawing} />
         </div>
       </div>
     </dialog>
   );
 }
 
-/** Opens a stored file once it is wanted, and closes it when done. */
+/** Opens a stored file once it is wanted, and closes it when done. A file is only ever returned for the address it was opened from. */
 export function usePdf(file: string | null, wanted: boolean) {
-  const [pdf, setPdf] = useState<PdfFile | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [fail] = useState(() => () => setFailed(true));
+  const [opened, setOpened] = useState<{ file: string; pdf: PdfFile } | null>(null);
+  const [failedFile, setFailedFile] = useState<string | null>(null);
+  const [reopening, setReopening] = useState(false);
+  const leave = useRef(() => {});
+  // Losing the worker says nothing about the file, and usePdf opens it again below.
+  const fail = useCallback((problem?: unknown) => {
+    if (!(problem instanceof WorkerLost)) setFailedFile(file);
+  }, [file]);
 
   useEffect(() => {
     if (!wanted || !file) return;
-    let current = true;
-    let opened: PdfFile | null = null;
-    setPdf(null);
-    setFailed(false);
-    openPdf(file).then(
-      (found) => {
-        if (current) {
-          opened = found;
-          setPdf(found);
-        } else found.close();
-      },
-      () => { if (current) setFailed(true); },
-    );
-    return () => {
-      current = false;
-      opened?.close();
+    const stop = new AbortController();
+    let held: PdfFile | null = null;
+    let tries = 1; // A file that keeps ending the worker goes to the browser's own viewer.
+    const recover = () => {
+      if (tries-- > 0) {
+        setReopening(true);
+        open();
+      } else setFailedFile(file);
     };
+    const open = () => {
+      setOpened(null);
+      openPdf(file, stop.signal).then(
+        (found) => {
+          if (stop.signal.aborted) {
+            found.close();
+            return;
+          }
+          held = found;
+          setOpened({ file, pdf: found });
+          setReopening(false);
+          void found.lost.then(() => {
+            if (stop.signal.aborted || held !== found) return;
+            held = null;
+            found.close();
+            recover();
+          });
+        },
+        (problem) => {
+          if (stop.signal.aborted) return;
+          if (problem instanceof WorkerLost) recover();
+          else setFailedFile(file);
+        },
+      );
+    };
+    leave.current = () => {
+      stop.abort();
+      held?.close();
+    };
+    setFailedFile(null);
+    setReopening(false);
+    open();
+    return () => leave.current();
   }, [file, wanted]);
 
-  return { pdf, failed, fail };
+  // Left first, so this file does not reopen when told its worker ended.
+  const stop = useCallback(() => {
+    leave.current();
+    setFailedFile(file);
+    stopPdfWorker();
+  }, [file]);
+
+  return { pdf: opened && opened.file === file ? opened.pdf : null, failed: failedFile !== null && failedFile === file, reopening, fail, stop };
 }
 
 /** The real stored file, drawn here with a magnifier. Clicking a page enlarges it in this tab. */
@@ -210,8 +254,20 @@ export function OriginalFile({ title, url, height = 720 }: { title: string; url:
   const frame = useRef<HTMLDivElement>(null);
   const near = useNear(frame);
   const [wanted, setWanted] = useState(false);
-  const { pdf, failed, fail } = usePdf(file, wanted);
+  const { pdf, failed, reopening, fail, stop } = usePdf(file, wanted);
   const [enlarged, setEnlarged] = useState<number | null>(null);
+  const [drawing, setDrawing] = useState(0);
+  const onDrawing = useCallback((change: number) => setDrawing((now) => now + change), []);
+  const [slow, setSlow] = useState(false);
+  const working = wanted && !failed && (!pdf || drawing > 0);
+
+  // Slowness is only ever reported. Nothing is cancelled unless asked.
+  useEffect(() => {
+    setSlow(false);
+    if (!working) return;
+    const timer = setTimeout(() => setSlow(true), SLOW_MS);
+    return () => clearTimeout(timer);
+  }, [working, file]);
 
   useEffect(() => {
     if (near) setWanted(true);
@@ -226,14 +282,20 @@ export function OriginalFile({ title, url, height = 720 }: { title: string; url:
           // The browser's own viewer, so a file this page cannot draw can still be read.
           <iframe key={url} title={`Original file: ${title}`} src={url} style={{ display: 'block', width: '100%', height, border: 0 }} />
         ) : pdf ? (
-          <Pages pdf={pdf} title={title} startPage={startPage} height={height} onOpen={setEnlarged} onFail={fail} />
+          <Pages pdf={pdf} title={title} startPage={startPage} height={height} onOpen={setEnlarged} onFail={fail} onDrawing={onDrawing} />
         ) : (
-          <p style={{ margin: 0, padding: 14, fontSize: 12, color: C.ink3 }}>Loading the original.</p>
+          <p style={{ margin: 0, padding: 14, fontSize: 12, color: C.ink3 }}>{reopening ? 'The viewer stopped, so this file is opening again.' : 'Loading the original.'}</p>
         )}
       </div>
-      {pdf && !failed && enlarged !== null && <PageModal pdf={pdf} title={title} page={enlarged} onClose={() => setEnlarged(null)} onFail={fail} />}
+      {pdf && !failed && enlarged !== null && <PageModal pdf={pdf} title={title} page={enlarged} onClose={() => setEnlarged(null)} onFail={fail} onDrawing={onDrawing} />}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', marginTop: 10, fontSize: 12 }}>
         {pdf && !failed && <span style={{ color: C.ink3 }}>Hover to magnify. Click a page to enlarge it.</span>}
+        {slow && !failed && (
+          <span role="status" style={{ color: C.ink3 }}>
+            Still working on this file. Large scans can take a few minutes.{' '}
+            <button onClick={stop} style={s.link12}>Stop</button>
+          </span>
+        )}
         <a href={`${file}?download=true`}>Download original</a>
       </div>
     </>

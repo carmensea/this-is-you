@@ -22,6 +22,7 @@
     "readiness:recovery": "node tools/readiness/import-recovery.mjs",
     "readiness:delete": "node tools/readiness/delete-document.mjs",
     "readiness:viewer": "node tools/readiness/original-viewer.mjs",
+    "readiness:worker": "node tools/readiness/pdf-worker.mjs",
     "deploy:https-flow": "node tools/deploy/https-flow.mjs"
   },
   "dependencies": {
