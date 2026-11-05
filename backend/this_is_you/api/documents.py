@@ -133,6 +133,13 @@ def get_content(request: Request, document_id: DocumentId, download: bool = Fals
     )
 
 
+@router.delete("/{document_id}", status_code=204)
+def delete_document(request: Request, document_id: DocumentId) -> None:
+    """Removes the file and everything read from it. A person asks for this one document, and it cannot be undone."""
+    state = request.app.state
+    service.delete_document(state.sessions, state.store, state.settings.deleting_dir, document_id)
+
+
 @router.post("/{document_id}/metadata/{field}", response_model=DocumentDetail)
 async def decide_field(request: Request, document_id: DocumentId, field: MetadataField) -> DocumentDetail:
     """Record what a person decided about one detail. The original file is not involved."""

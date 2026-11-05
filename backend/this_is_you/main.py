@@ -22,6 +22,7 @@ from .extraction import sandbox
 from .extraction.queue import ExtractionQueue
 from .extraction.runner import ReaderUnavailable
 from .metadata import documents_to_resume, process_document
+from .documents import finish_deletions
 from .reconcile import reconcile
 from .schemas import Status
 from .security import LocalOnlyMiddleware
@@ -48,6 +49,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.engine = engine
     app.state.sessions = sessionmaker(engine, expire_on_commit=False)
     clear_leftovers(settings)
+    finish_deletions(app.state.sessions, store, settings.deleting_dir)  # Before recovery, which would bring the file back.
     app.state.reconciled = reconcile(settings, app.state.sessions)  # Before reading resumes, so recovered files get read.
     app.state.login_throttle = auth.LoginThrottle()
     sandbox.configure(settings.data_dir, settings.reader_must_be_sandboxed, settings.reader_socket)

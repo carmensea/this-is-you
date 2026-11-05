@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
+from this_is_you import documents
 from this_is_you import reconcile as reconcile_module
 from this_is_you.storage import OriginalStore
 
@@ -33,6 +34,21 @@ def main(stage: str, data_dir: str, batch: str = "", item: str = "", body_path: 
 
         reconcile_module.utc_now = second_call_dies
         client_for(data)
+        return
+    if stage.startswith("delete_"):
+        client = client_for(data)
+        if stage == "delete_inside_transaction":  # Every row is gone in the open transaction, and none is committed.
+            real_remove = documents._remove_rows
+
+            def remove_then_die(session, document_id):
+                real_remove(session, document_id)
+                session.flush()
+                die()
+
+            documents._remove_rows = remove_then_die
+        else:
+            event.listen(Session, "after_commit", die)
+        client.delete(f"/api/documents/{batch}", headers=CLIENT_HEADERS)
         return
     real_commit = OriginalStore.commit
 

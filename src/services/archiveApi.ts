@@ -84,6 +84,7 @@ export interface DocumentsBackend {
   listBatchItems(batchId: string, query: ReportQuery): Promise<{ items: ImportReportItem[]; total: number }>;
   retryReading(batchId: string, itemId?: number): Promise<unknown>;
   removeBatch(batchId: string): Promise<unknown>;
+  deleteDocument(documentId: string): Promise<unknown>;
   getIdentity(): Promise<IdentityDetails>;
   saveIdentity(details: Omit<IdentityDetails, 'configured'>): Promise<IdentityDetails>;
   listBackups(): Promise<BackupListing>;

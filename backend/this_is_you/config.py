@@ -63,6 +63,10 @@ class Settings:
         return self.data_dir / "incoming"
 
     @property
+    def deleting_dir(self) -> Path:
+        return self.data_dir / "deleting"
+
+    @property
     def quarantine_dir(self) -> Path:
         return self.data_dir / "set-aside"
 

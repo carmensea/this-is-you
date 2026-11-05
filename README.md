@@ -45,6 +45,7 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 | `npm run deploy:https-flow` | The app in production mode in Chrome, through an HTTPS proxy like `tailscale serve`, on a fictional archive |
 | `deploy/test/verify-vm.sh PHASE` | The Compose deployment on a real Linux machine, with attacks and crashes. **Wipes `/srv/this-is-you`: throwaway machines only.** |
 | `npm run readiness:recovery` | An import killed between saving a file and recording it, in Chrome, on a fictional archive: restarts, resuming, and the report against Documents |
+| `npm run readiness:delete` | Deleting a document in Chrome on a fictional archive: asking first, what goes, what stays, and a restart |
 | `npm run readiness:review` | Group review in Chrome on a fictional archive: corrections, stale groups, approval, undo and real restarts |
 | `npm run readiness:dev` | Sign in, import and sign out through the real dev server, on a fictional archive. About 1 minute. |
 | `npm run readiness -- [--scale 1]` | The whole import, crash, backup and restore workflow in Chrome, on a messy fictional folder. About 4 minutes at scale 1. Needs a prior build. |
@@ -197,6 +198,10 @@ Originals are drawn on the page by pdf.js, on this computer. Hover over a page t
 Numeric dates are read month first (03/11/2024 is 11 March), and this alone is not a reason for low confidence. A date that only works day first, such as 28/03/2024, is read that way. A two-digit year still gets a warning.
 
 In a review table, each row of the PDF is cut out and shown above what was read from it. Tick each row that matches, or use the box at the top to tick every row shown. Approve turns on when every row is ticked, and nothing is approved before that. A row that changes must be ticked again. A row that cannot be found for certain in the page's text says so, and the top box leaves it for you to check and tick yourself.
+
+## Deleting a document
+
+**Delete document** on the Documents screen asks first, by name, then removes the file and everything known from it: readings, results, decisions, review approvals and its rows in the import report. Other documents are not touched. It is permanent, and a crash partway either finishes it at the next start or leaves everything in place. It does not reach backups already made, which still hold the file until they are removed, and a deleted file's folder will import it again if chosen again.
 
 ## What the document reader does not handle
 

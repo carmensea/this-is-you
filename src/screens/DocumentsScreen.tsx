@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Footer, Checkbox } from '../components/controls';
 import { OriginalFile } from '../components/OriginalFile';
 import { useStore } from '../state/useStore';
@@ -193,6 +193,7 @@ function DocumentDetail({ v }: { v: VM }) {
             >
               Set snapshot to this date
             </button>
+            {v.detail.ddCanDelete && <DeleteDocument name={v.detail.ddDeleteName} what={v.detail.ddDeleteWhat} onDelete={v.detail.ddDelete} />}
           </div>
           <div
             style={{
@@ -409,6 +410,57 @@ function DocumentDetail({ v }: { v: VM }) {
         </>
       )}
     </section>
+  );
+}
+
+/** Asks first, by name, and starts on Cancel. Deleting is permanent, so one stray click must not do it. */
+function DeleteDocument({ name, what, onDelete }: { name: string; what: string; onDelete: () => Promise<string | null> }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (open && dialog.current && !dialog.current.open) dialog.current.showModal?.();
+  }, [open]);
+  const close = () => {
+    setOpen(false);
+    setProblem(null);
+  };
+  const confirm = async () => {
+    setBusy(true);
+    const failed = await onDelete();
+    setBusy(false);
+    if (failed) setProblem(failed);
+    else close();
+  };
+  return (
+    <>
+      <button onClick={() => setOpen(true)} style={{ fontSize: 13, color: C.rust, borderBottom: `1px solid ${C.rust}`, alignSelf: 'center' }}>
+        Delete document
+      </button>
+      {open && (
+        <dialog ref={dialog} aria-label="Delete this document" onClose={close} style={{ maxWidth: 480, padding: 20, border: `1px solid ${C.rule}`, background: C.paper, color: C.ink }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, overflowWrap: 'anywhere' }}>Delete {name}?</h2>
+          <p style={{ margin: '10px 0 0', fontSize: 13, lineHeight: 1.5 }}>{what}</p>
+          <p style={{ margin: '10px 0 0', fontSize: 13, lineHeight: 1.5, color: C.ink2 }}>
+            Backups you already made still hold it. Choosing the same folder again would import it again unless you move the file.
+          </p>
+          {problem && (
+            <p role="alert" style={{ margin: '10px 0 0', fontSize: 13, color: C.rust }}>
+              {problem}
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 16 }}>
+            <button autoFocus onClick={close} style={s.link125}>
+              Cancel
+            </button>
+            <button onClick={confirm} disabled={busy} style={{ background: C.rust, color: C.paper, padding: '7px 12px', fontSize: 13, fontWeight: 500 }}>
+              Delete permanently
+            </button>
+          </div>
+        </dialog>
+      )}
+    </>
   );
 }
 

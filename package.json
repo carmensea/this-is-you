@@ -20,6 +20,7 @@
     "readiness:dev": "node tools/readiness/devflow.mjs",
     "readiness:review": "node tools/readiness/review-groups.mjs",
     "readiness:recovery": "node tools/readiness/import-recovery.mjs",
+    "readiness:delete": "node tools/readiness/delete-document.mjs",
     "readiness:viewer": "node tools/readiness/original-viewer.mjs",
     "deploy:https-flow": "node tools/deploy/https-flow.mjs"
   },

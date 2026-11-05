@@ -317,6 +317,7 @@ export async function connectLocalArchive(): Promise<{ api: ArchiveApi; backend:
     retryReading: (batchId, itemId) =>
       post(`/api/import-batches/${batchId}/retry-reading${itemId === undefined ? '' : `?item=${itemId}`}`),
     removeBatch: (batchId) => post(`/api/import-batches/${batchId}`, undefined, 'DELETE'),
+    deleteDocument: (documentId) => post(`/api/documents/${documentId}`, undefined, 'DELETE'),
     getArchiveHealth: () => getJson('/api/backups/archive-health'),
     signOut: (everywhere) => post(everywhere ? '/api/auth/logout-everywhere' : '/api/auth/logout'),
     getIdentity: () => getJson('/api/identity'),

@@ -7,7 +7,7 @@ export type Answer = { state?: ImportReportItem['state']; extraction?: ImportRep
 
 type Readiness = Pick<
   DocumentsBackend,
-  'createBatch' | 'addBatchItems' | 'uploadBatchItem' | 'listBatches' | 'listBatchItems' | 'retryReading' | 'removeBatch' | 'getArchiveHealth' | 'signOut' | 'getIdentity' | 'saveIdentity' | 'listBackups' | 'startBackup' | 'checkBackup'
+  'createBatch' | 'addBatchItems' | 'uploadBatchItem' | 'listBatches' | 'listBatchItems' | 'retryReading' | 'removeBatch' | 'deleteDocument' | 'getArchiveHealth' | 'signOut' | 'getIdentity' | 'saveIdentity' | 'listBackups' | 'startBackup' | 'checkBackup'
 >;
 
 const category = (i: ImportReportItem): ImportCategory => {
@@ -76,6 +76,7 @@ export function fakeImportServer(answer: Answer = { state: 'stored', extraction:
     }),
     retryReading: vi.fn(async () => ({ requeued: 0 })),
     removeBatch: vi.fn(async (batch: string) => void rows.delete(batch)),
+    deleteDocument: vi.fn(async () => undefined),
     getArchiveHealth: vi.fn(async () => ({ recovered: 0, set_aside: 0, missing: 0, reader_isolation: 'sandboxed' as const })),
     signOut: vi.fn(async () => undefined),
     getIdentity: vi.fn(async () => ({ full_name: '', date_of_birth: null, previous_names: [], configured: false })),

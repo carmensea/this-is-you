@@ -66,6 +66,7 @@ Assumes the parser can be subverted by a crafted file.
 - **Anything else in `originals/`** is moved to `set-aside/`, never deleted, and reported. Links are moved, not followed.
 - **Missing originals** are counted and reported.
 - **Stale copies:** partial uploads and plain staging copies are cleared at start. Only the 2 newest `before-upgrade` databases are kept.
+- **Deleting a document** does not reach existing backups, and on an SSD the removed file's blocks may survive until the drive reuses them. Rows are overwritten in the database and cleared from its log.
 - **`prune`** lists older backups, unfinished work and replaced archives, and removes them only with `--yes`. The newest backup that passed a check is always kept.
 - Deleted database rows are overwritten (`secure_delete`).
 

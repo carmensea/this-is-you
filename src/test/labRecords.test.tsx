@@ -639,6 +639,50 @@ describe('the review table', () => {
       `First read as LDL Cholesterol 118 mg/dL, collected ${fShort('2020-06-15')}. Kept in the history.`,
     );
   });
+  describe('deleting a document', () => {
+    const openDocument = (rows: LabObservation[]) => {
+      const backend = fakeBackend();
+      backend.listObservations = vi.fn(async () => rows);
+      HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) { this.setAttribute('open', ''); };
+      return { ...mount(rows, { view: 'documents', dSel: 'd'.repeat(32) }, backend), backend };
+    };
+    const offer = () => fireEvent.click(screen.getByRole('button', { name: 'Delete document' }));
+    const confirm = () => act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' })); });
+
+    it('asks first, by name, and says what goes, and clicking the button deletes nothing', () => {
+      const { backend } = openDocument([proposed(), proposed({ id: 'b'.repeat(32), verification_status: 'verified' })]);
+      offer();
+      const dialog = screen.getByRole('dialog', { name: 'Delete this document' });
+      expect(dialog.textContent).toContain('2 results read from it (1 you accepted)');
+      expect(dialog.textContent).toContain('cannot be undone');
+      expect(dialog.textContent).toContain('Backups you already made still hold it');
+      expect(backend.deleteDocument).not.toHaveBeenCalled();
+    });
+    it('does nothing on Cancel', () => {
+      const { backend } = openDocument([proposed()]);
+      offer();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(backend.deleteDocument).not.toHaveBeenCalled();
+    });
+    it('deletes this document only when confirmed', async () => {
+      const { backend } = openDocument([proposed()]);
+      offer();
+      await confirm();
+      expect(backend.deleteDocument).toHaveBeenCalledTimes(1);
+      expect(backend.deleteDocument).toHaveBeenCalledWith('d'.repeat(32));
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    it('shows why it was refused, and keeps the document', async () => {
+      const { backend } = openDocument([proposed()]);
+      const { ArchiveRequestError } = await import('../services/archiveApi');
+      backend.deleteDocument = vi.fn(async () => { throw new ArchiveRequestError('This document is still being read. Try again when it finishes.', 'still_reading'); });
+      offer();
+      await confirm();
+      expect(screen.getByRole('alert').textContent).toContain('still being read');
+      expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeTruthy();
+    });
+  });
   describe('review groups', () => {
     const clean = (over: Partial<LabObservation> = {}) =>
       proposed({ group_eligible: true, review_group: '2020-06-15|cbc|0', review_group_label: 'Complete blood count', version: 7, source_page: 2, source_line: 9, collected_on: '2020-06-15', ...over });

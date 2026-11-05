@@ -611,6 +611,13 @@ export class AppStore {
     }
   }
 
+  /** Removes a document for good. Resolves to an error for the dialog to show, or null. */
+  deleteDocument = async (id: string) => {
+    const problem = await this.attempt((backend) => backend.deleteDocument(id), { dSel: null, dSource: null });
+    if (!problem) await this.imports.refresh();
+    return problem;
+  };
+
   /** Saves a correction. Resolves to an error for the form to show, or null. */
   correctObservation = (id: string, fields: ObservationFieldValues) =>
     this.attempt((backend) => backend.correctObservation(id, fields), { rvEdit: null, manualEdit: null });

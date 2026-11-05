@@ -223,6 +223,7 @@ export function documentsVM(store: AppStore) {
           : ['Parsed', '#8A5A1F']
         : ['Not extracted', C.ink3];
   const preview = sel.draw != null && !sel.dup;
+  const verifiedHere = sel.review?.observations.filter((o) => o.verification_status === 'verified').length ?? 0;
   const real = sel.review?.observations;
   return {
     ...out,
@@ -248,6 +249,16 @@ export function documentsVM(store: AppStore) {
           ? 'Change reviewed details'
           : 'Review details'
         : 'Review extracted values',
+      ddCanDelete: !!sel.review,
+      ddDeleteName: sel.file,
+      ddDeleteWhat: sel.review
+        ? `This permanently removes the file${
+            sel.review.observations.length
+              ? `, ${plural(sel.review.observations.length, 'result')} read from it${verifiedHere ? ` (${verifiedHere} you accepted)` : ''}`
+              : ''
+          } and its place in the import report. It cannot be undone.`
+        : '',
+      ddDelete: () => store.deleteDocument(sel.id),
       ddDupLabel: sel.review ? 'Open the possible duplicate' : 'Open the original copy',
       ddCanReread: sel.review?.extraction === 'failed' || sel.review?.extraction === 'too_complex',
       ddReread: () => void store.readAgain(sel.id),
