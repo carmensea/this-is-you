@@ -199,15 +199,30 @@ def test_a_cpu_hog_is_stopped_by_the_cpu_limit(tmp_path):
     assert time.monotonic() - started < 10
 
 
-def test_a_memory_hog_is_stopped_by_the_memory_limit(tmp_path):
-    command = _script(tmp_path, """
-        from this_is_you.extraction.worker import apply_limits
-        apply_limits({"cpu_seconds": 20, "memory_bytes": 200 * 1024 ** 2})
-        blocks = []
-        while True:
-            blocks.append(bytearray(b"x" * (10 * 1024 ** 2)))
+def _hostile_reader(tmp_path: Path, memory: int) -> list[str]:
+    """The production reader, worker.main(), with only its reading swapped for something that keeps taking memory.
+    Its limits, network block, error handling and output are the real ones. It reports success only if nothing stopped it
+    by three times its limit, so a pass means the limit was enforced and the reader could not carry on."""
+    return _script(tmp_path, f"""
+        import json, sys
+        from this_is_you.extraction import worker
+
+        def hostile(source, limits, today):
+            blocks = []
+            for _ in range(3 * limits["memory_bytes"] // (10 * 1024 ** 2)):
+                blocks.append(bytearray(b"x" * (10 * 1024 ** 2)))
+            return {{"status": "extracted", "proposals": [], "lab_rows": []}}
+
+        worker.read_pdf = hostile
+        sys.argv = ["worker", json.dumps({{"cpu_seconds": 20, "memory_bytes": {memory}, "max_pages": 10, "max_chars": 1000}}), "2026-11-01"]
+        worker.main()
     """)
-    assert run_command(command, 20).status == "too_complex"
+
+
+def test_a_memory_hog_is_stopped_by_the_memory_limit(tmp_path):
+    started = time.monotonic()
+    assert run_command(_hostile_reader(tmp_path, 200 * 1024 ** 2), 20).status == "too_complex"
+    assert time.monotonic() - started < 15
 
 
 def test_the_reader_cannot_write_files(tmp_path):
@@ -278,15 +293,8 @@ def test_a_service_that_once_used_a_lot_of_memory_still_reads_small_pdfs(tmp_pat
 
 def test_a_memory_hog_is_still_stopped_after_the_service_used_a_lot(tmp_path):
     held = _hold(1200)
-    command = _script(tmp_path, """
-        from this_is_you.extraction.worker import apply_limits
-        apply_limits({"cpu_seconds": 20, "memory_bytes": 200 * 1024 ** 2})
-        blocks = []
-        while True:
-            blocks.append(bytearray(b"x" * (10 * 1024 ** 2)))
-    """)
     started = time.monotonic()
-    status = run_command(command, 20).status
+    status = run_command(_hostile_reader(tmp_path, 200 * 1024 ** 2), 20).status
     del held
     assert status == "too_complex" and time.monotonic() - started < 15
 
