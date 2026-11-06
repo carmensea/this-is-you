@@ -216,6 +216,87 @@ function DetailEditor({ l }: { l: Field }) {
   );
 }
 
+function DetailCell({ l, v }: { l: Field; v: VM }) {
+  const box = useRef<HTMLDivElement>(null);
+  const wasEditing = useRef(false);
+  // The editor takes the focus when it opens, and hands it back to this detail's own action when it closes.
+  useEffect(() => {
+    if (l.isEditing) box.current?.querySelector<HTMLElement>('[data-editing] input, [data-editing] button')?.focus();
+    else if (wasEditing.current && !box.current?.contains(document.activeElement)) box.current?.querySelector<HTMLButtonElement>('[data-field-action]')?.focus();
+    wasEditing.current = l.isEditing;
+  }, [l.isEditing]);
+  const escape = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape' && l.isEditing) {
+      e.stopPropagation();
+      l.onCancel();
+    }
+  };
+  return (
+    <div ref={box} onKeyDown={escape} style={{ padding: '8px 12px 10px', borderBottom: `1px solid ${C.rule2}`, borderRight: `1px solid ${C.rule2}`, minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={s.muted115}>{l.label}</span>
+        <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 11, fontWeight: 500, color: l.isConfirmed ? C.green : C.ink2 }}>
+          {l.isConfirmed && <Tick />}
+          {l.badge}
+        </span>
+      </div>
+      <div style={{ fontSize: 14, marginTop: 2, overflowWrap: 'anywhere' }}>{l.value}</div>
+      {l.note && <div style={{ ...s.body125, fontSize: 11.5, marginTop: 2 }}>{l.note}</div>}
+      {l.isEditing && <DetailEditor l={l} />}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center', marginTop: 6 }}>
+        {l.showActions && !l.isEditing && (
+          <>
+            {l.canConfirm && (
+              <button onClick={l.onConfirm} style={outlined(C.green)}>
+                Confirm
+              </button>
+            )}
+            <button data-field-action onClick={l.onEdit} style={s.link125}>
+              Correct
+            </button>
+            {l.canNotStated && (
+              <button onClick={l.onNotStated} style={{ ...s.link125, color: C.muted }}>
+                Not stated
+              </button>
+            )}
+            {!l.isPending && (
+              <button onClick={l.onCancel} style={{ ...s.link125, color: C.muted }}>
+                Keep as it is
+              </button>
+            )}
+          </>
+        )}
+        {l.canChange && (
+          <button data-field-action onClick={v.rvIsReal ? l.onChange : l.onUndoDemo} style={{ ...s.link125, color: C.muted }}>
+            {v.rvIsReal ? 'Change' : 'Undo'}
+          </button>
+        )}
+        <details style={{ fontSize: 11.5, color: C.ink2 }}>
+          <summary style={{ color: C.muted, cursor: 'pointer' }}>Source</summary>
+          <div style={{ paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span>{l.statusText}</span>
+            {l.evidence && (
+              <span style={{ overflowWrap: 'anywhere' }}>
+                {l.evidence}
+                {l.evidencePage > 0 && (
+                  <>
+                    {' '}
+                    <button onClick={l.onShowPage} style={s.link12}>
+                      Show page {l.evidencePage}
+                    </button>
+                  </>
+                )}
+              </span>
+            )}
+            {l.isLow && !l.note && <span>{l.reason}</span>}
+            {l.isEdited && <span>{l.editedText}</span>}
+          </div>
+        </details>
+      </div>
+    </div>
+  );
+}
+
 function DocumentDetails({ v }: { v: VM }) {
   return (
     <section aria-label="Document details" style={{ marginTop: 14, border: `1px solid ${C.rule}` }}>
@@ -230,68 +311,7 @@ function DocumentDetails({ v }: { v: VM }) {
       {v.rvDetailsOpen && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', borderTop: `1px solid ${C.rule2}` }}>
           {v.rvFields.map((l) => (
-            <div key={l.label} style={{ padding: '8px 12px 10px', borderBottom: `1px solid ${C.rule2}`, borderRight: `1px solid ${C.rule2}`, minWidth: 0 }}>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <span style={s.muted115}>{l.label}</span>
-                <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 11, fontWeight: 500, color: l.isConfirmed ? C.green : C.ink2 }}>
-                  {l.isConfirmed && <Tick />}
-                  {l.badge}
-                </span>
-              </div>
-              <div style={{ fontSize: 14, marginTop: 2, overflowWrap: 'anywhere' }}>{l.value}</div>
-              {l.note && <div style={{ ...s.body125, fontSize: 11.5, marginTop: 2 }}>{l.note}</div>}
-              {l.isEditing && <DetailEditor l={l} />}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center', marginTop: 6 }}>
-                {l.showActions && !l.isEditing && (
-                  <>
-                    {l.canConfirm && (
-                      <button onClick={l.onConfirm} style={outlined(C.green)}>
-                        Confirm
-                      </button>
-                    )}
-                    <button onClick={l.onEdit} style={s.link125}>
-                      Correct
-                    </button>
-                    {l.canNotStated && (
-                      <button onClick={l.onNotStated} style={{ ...s.link125, color: C.muted }}>
-                        Not stated
-                      </button>
-                    )}
-                    {!l.isPending && (
-                      <button onClick={l.onCancel} style={{ ...s.link125, color: C.muted }}>
-                        Keep as it is
-                      </button>
-                    )}
-                  </>
-                )}
-                {l.canChange && (
-                  <button onClick={v.rvIsReal ? l.onChange : l.onUndoDemo} style={{ ...s.link125, color: C.muted }}>
-                    {v.rvIsReal ? 'Change' : 'Undo'}
-                  </button>
-                )}
-                <details style={{ fontSize: 11.5, color: C.ink2 }}>
-                  <summary style={{ color: C.muted, cursor: 'pointer' }}>Source</summary>
-                  <div style={{ paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span>{l.statusText}</span>
-                    {l.evidence && (
-                      <span style={{ overflowWrap: 'anywhere' }}>
-                        {l.evidence}
-                        {l.evidencePage > 0 && (
-                          <>
-                            {' '}
-                            <button onClick={l.onShowPage} style={s.link12}>
-                              Show page {l.evidencePage}
-                            </button>
-                          </>
-                        )}
-                      </span>
-                    )}
-                    {l.isLow && !l.note && <span>{l.reason}</span>}
-                    {l.isEdited && <span>{l.editedText}</span>}
-                  </div>
-                </details>
-              </div>
-            </div>
+            <DetailCell key={l.label} l={l} v={v} />
           ))}
         </div>
       )}
@@ -305,7 +325,7 @@ function DemoEditor({ l }: { l: Line }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: '10px 14px' }}>
         <label style={s.muted115}>
           Value
-          <input value={l.dValue} onChange={l.onDValue} style={fieldInput} />
+          <input data-field="value_text" value={l.dValue} onChange={l.onDValue} style={fieldInput} />
         </label>
         <label style={s.muted115}>
           Unit
@@ -339,7 +359,8 @@ function Row({ l, v, bind }: { l: Line; v: VM; bind: (key: string, el: HTMLButto
   const wasEditing = useRef(false);
   // A form that opens takes the focus, and gives it back to its row when it closes, so the keyboard never loses its place.
   useEffect(() => {
-    if (l.isEditing) box.current?.querySelector<HTMLInputElement>('[data-editing] input:not([type="date"])')?.focus();
+    // The value is what a correction is nearly always about, and all an unread result needs.
+    if (l.isEditing) box.current?.querySelector<HTMLInputElement>('[data-editing] [data-field="value_text"]')?.focus();
     else if (wasEditing.current && !box.current?.contains(document.activeElement)) box.current?.querySelector<HTMLButtonElement>('button[aria-expanded]')?.focus();
     wasEditing.current = l.isEditing;
   }, [l.isEditing]);

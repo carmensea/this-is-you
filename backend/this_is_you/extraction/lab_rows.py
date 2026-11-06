@@ -42,6 +42,19 @@ _WORD_RESULTS = {
     "1+", "2+", "3+", "4+",
 }
 _WORD_RANGE_STARTS = re.compile(r"^(not estab|see below|see note|negative|none seen|not seen|none|absent|not detected|nonreactive|non-reactive|normal)", re.I)
+# Color and clarity are words too, but only for a test that asks for an appearance: "Red" is no answer to anything else.
+_APPEARANCE_WORDS = {
+    "yellow", "pale yellow", "light yellow", "dark yellow", "straw", "amber", "dark amber", "colorless", "colourless", "red", "orange", "brown", "green", "pink",
+    "clear", "slightly cloudy", "cloudy", "hazy", "slightly hazy", "turbid", "slightly turbid",
+}
+_APPEARANCE_NAME = re.compile(r"\b(colou?r|clarity|appearance|turbidity)\b", re.I)
+_APPEARANCE_ROW = re.compile(r"^(.+?)\s+(" + "|".join(sorted(map(re.escape, _APPEARANCE_WORDS), key=len, reverse=True)) + r")(?:\s+(.+))?$", re.I)
+
+
+def _is_appearance(name: str, text: str) -> bool:
+    return text.lower() in _APPEARANCE_WORDS and bool(_APPEARANCE_NAME.search(name))
+
+
 # A whole row whose result is a word: "Bacteria None seen None seen". The name is the shortest start that leaves a known word.
 _WORD_ROW = re.compile(r"^(.+?)\s+(" + "|".join(sorted(map(re.escape, _WORD_RESULTS), key=len, reverse=True)) + r")(?:\s+(.+))?$", re.I)
 _SENTENCE_VERBS = {"is", "are", "was", "were", "be", "been", "seen", "noted"}
@@ -181,7 +194,7 @@ def _assess(name: str, cells: _Cells, extra: list[str] | None = None) -> tuple[l
         issues.append("This value is reported as a limit rather than an exact number, so it will not be graphed.")
     elif _RANGE_TOKEN.match(value):
         issues.append("This result is printed as a range rather than one number, so it will not be graphed.")
-    elif value and value.lower() in _WORD_RESULTS:
+    elif value and (value.lower() in _WORD_RESULTS or _is_appearance(name, value)):
         issues.append("This result is a word rather than a number, so it will not be graphed.")
     return issues, LOW if issues or test is None else (HIGH if cells.reference else MEDIUM)
 
@@ -253,12 +266,15 @@ def _split_labels(text: str) -> list[tuple[str | None, str]]:
 
 def _word_row(line: Line, today: date) -> LabRow | None:
     match = _WORD_ROW.match(line.text)
-    if not match:
-        return None
+    appearance = match is None or not _looks_like_name(match[1].strip(" .:;*"), today)
+    if appearance:
+        match = _APPEARANCE_ROW.match(line.text)
+        if not match or not _APPEARANCE_NAME.search(match[1]):
+            return None
     name, rest = match[1].strip(" .:;*"), match[3]
     if not _looks_like_name(name, today) or _SENTENCE_VERBS & set(name.lower().split()):
         return None
-    if rest and not (_WORD_RANGE_STARTS.match(rest) or rest.lower() in _WORD_RESULTS):
+    if rest and not (_WORD_RANGE_STARTS.match(rest) or rest.lower() in _WORD_RESULTS or (appearance and _is_appearance(name, rest))):
         return None
     cells = _Cells(value=match[2], reference=rest[:60] if rest else None)
     issues, confidence = _assess(name, cells)
@@ -277,7 +293,7 @@ def _is_header(text: str) -> bool:
 def _looks_like_name(text: str, today: date) -> bool:
     words = text.split()
     return (
-        len(words) <= 7 and len(text) <= 80 and words[0][0].isalpha() and text.lower() not in _WORD_RESULTS and ":" not in text and not text.endswith((".", "?", "!"))
+        len(words) <= 7 and len(text) <= 80 and words[0][0].isalpha() and text.lower() not in _WORD_RESULTS and text.lower() not in _APPEARANCE_WORDS and ":" not in text and not text.endswith((".", "?", "!"))
         and not _NOISE_START.match(words[0]) and not _TABLE_NOISE_START.match(words[0]) and not find_dates(text, today) and not _DATE_LIKE.search(text)
     )
 
@@ -310,6 +326,10 @@ def _into(pending: _Pending, slot: str | None, text: str) -> bool:
         cells.value, cells.unit = words[0], unit_cells.unit
     elif text.lower() in _WORD_RESULTS and (slot == "value" or cells.value is None):
         cells.value = text
+    elif _is_appearance(pending.name, text) and cells.value is None:
+        cells.value = text
+    elif _is_appearance(pending.name, text) and cells.reference is None:
+        cells.reference = text
     elif cells.value is not None and cells.reference is None and _WORD_RANGE_STARTS.match(text):
         cells.reference = text[:60]
     elif text.lower() == "normal" and cells.value is not None:

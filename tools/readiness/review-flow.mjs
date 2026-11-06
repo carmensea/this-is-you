@@ -32,7 +32,7 @@ import sys
 sys.path.insert(0, 'backend')
 from tests import pdfs
 head = ['Fictional Family Health Portal', 'Fictional Lakeside Laboratory', 'Patient: Avery Testperson', 'Specimen Collected: 03/04/2025 08:40', 'Result Date: 03/05/2025', 'Component Your Value Standard Range Flag']
-urine = ['Urinalysis', 'Specific Gravity 1.015 1.005 - 1.030', 'pH, Urine 6.0 5.0 - 8.0', 'Protein, Urine Negative Negative', 'Glucose, Urine Negative Negative',
+urine = ['Urinalysis', 'Color, Urine Yellow Yellow', 'Clarity, Urine Slightly Cloudy Clear', 'Specific Gravity 1.015 1.005 - 1.030', 'pH, Urine 6.0 5.0 - 8.0', 'Protein, Urine Negative Negative', 'Glucose, Urine Negative Negative',
          'Ketones, Urine Negative Negative', 'Blood, Urine Trace Negative', 'Nitrite, Urine Negative Negative', 'Urobilinogen 0.2 mg/dL 0.2 - 1.0 mg/dL']
 micro = ['Microscopic Examination', 'WBC, Urine', '0-2 /HPF', '0 - 5 /HPF', 'RBC, Urine', '3-5 /HPF', '0 - 2 /HPF', 'Squamous Epithelial Cells', 'Few',
          'Bacteria', 'Moderate', 'None seen', 'Hyaline Casts', '0-2/LPF0-2/LPF']
@@ -133,7 +133,7 @@ ok('opening review approved nothing', all.length > 0 && all.every((o) => o.verif
 const names = await list.locator('[data-row] button[aria-expanded] > span:first-child').allInnerTexts();
 const printed = [...all].sort((a, b) => a.source_page - b.source_page || a.source_line - b.source_line).map((o) => o.reported_name);
 ok('rows are in the order printed', JSON.stringify(names) === JSON.stringify(printed));
-const EXPECTED = ['Specific Gravity', 'pH, Urine', 'Protein, Urine', 'Glucose, Urine', 'Ketones, Urine', 'Blood, Urine', 'Nitrite, Urine', 'Urobilinogen',
+const EXPECTED = ['Color, Urine', 'Clarity, Urine', 'Specific Gravity', 'pH, Urine', 'Protein, Urine', 'Glucose, Urine', 'Ketones, Urine', 'Blood, Urine', 'Nitrite, Urine', 'Urobilinogen',
   'WBC, Urine', 'RBC, Urine', 'Squamous Epithelial Cells', 'Bacteria', 'Hyaline Casts',
   'Glucose', 'BUN', 'Creatinine', 'Sodium', 'Potassium', 'Chloride', 'Carbon Dioxide, Total', 'Calcium', 'Protein, Total', 'Albumin', 'Globulin, Total',
   'Bilirubin, Total', 'Alkaline Phosphatase', 'AST (SGOT)', 'ALT (SGPT)', 'Hemoglobin A1c', 'TSH', 'Ferritin', 'Hemoglobin', 'Hematocrit', 'Platelets'];
@@ -142,7 +142,7 @@ const read = Object.fromEntries(all.map((o) => [o.reported_name, o]));
 ok('each keeps its page, line and printed text', all.every((o) => o.source_page >= 1 && o.source_line >= 1 && o.source_text.startsWith(o.reported_name)));
 ok('the microscopy cells keep their own printed text', read['WBC, Urine'].source_text === 'WBC, Urine | 0-2 /HPF | 0 - 5 /HPF' && read['Hyaline Casts'].source_text === 'Hyaline Casts | 0-2/LPF0-2/LPF');
 ok('the unread value is proposed empty, saying what was printed', read['Hyaline Casts'].value_text === '' && read['Hyaline Casts'].issues.some((i) => i.includes('0-2/LPF0-2/LPF')));
-for (const [name, value] of [['WBC, Urine', '0-2'], ['Squamous Epithelial Cells', 'Few'], ['Bacteria', 'Moderate'], ['Hyaline Casts', 'Not read']]) {
+for (const [name, value] of [['Color, Urine', 'Yellow'], ['Clarity, Urine', 'Slightly Cloudy'], ['WBC, Urine', '0-2'], ['Squamous Epithelial Cells', 'Few'], ['Bacteria', 'Moderate'], ['Hyaline Casts', 'Not read']]) {
   ok(`${name} reads as ${value}`, (await row(name).innerText()).includes(value));
 }
 ok('no select-all or group approval', (await page.getByRole('checkbox').count()) === 0 && (await page.getByRole('button', { name: /^Approve/ }).count()) === 0);
@@ -151,6 +151,11 @@ ok('a doubted result asks for a look first', /Check/.test(await row('Globulin, T
 await shot('1-start');
 
 console.log('\n--- Deciding');
+const detailsBox = page.getByRole('region', { name: 'Document details' });
+await detailsBox.getByRole('button', { name: 'Correct' }).first().click();
+ok('a detail editor takes the focus', await page.evaluate(() => document.activeElement?.closest('[data-editing]') !== null));
+await page.keyboard.press('Escape');
+ok('Escape closes it and gives the focus back to Correct', await page.evaluate(() => document.activeElement?.textContent === 'Correct') && (await detailsBox.locator('[data-editing]').count()) === 0);
 await page.getByRole('button', { name: 'Confirm' }).first().waitFor();
 while ((await page.getByRole('region', { name: 'Document details' }).getByRole('button', { name: 'Confirm' }).count()) > 0) {
   await page.getByRole('region', { name: 'Document details' }).getByRole('button', { name: 'Confirm' }).first().click();
@@ -185,7 +190,7 @@ ok('and R then rejects it instead', await settle(async () => (await status('Nitr
 console.log('\n--- Keyboard and screen reader');
 await select('Hyaline Casts');
 await page.keyboard.press('c');
-ok('C opens the correction form with the focus in it', await page.evaluate(() => document.activeElement?.closest('[data-editing]') !== null && document.activeElement?.tagName === 'INPUT'));
+ok('C opens the correction form with the focus on its Value', await page.evaluate(() => document.activeElement?.closest('[data-editing]') !== null && document.activeElement?.getAttribute('data-field') === 'value_text'));
 await page.keyboard.press('Escape');
 ok('Escape closes it and puts the focus back on its row', await page.evaluate(() => (document.activeElement?.getAttribute('aria-label') ?? '').startsWith('Hyaline Casts: no value read')));
 await page.keyboard.press('Tab');
@@ -196,7 +201,7 @@ const unnamed = await page.getByRole('region', { name: 'Extracted values' }).eva
     return !label;
   }).length);
 ok('every control on the review panel has a name', unnamed === 0, `${unnamed} without`);
-ok('progress is announced politely as it changes', /of 34 measurements decided/.test(await page.getByRole('status').first().innerText()));
+ok('progress is announced politely as it changes', /of 36 measurements decided/.test(await page.getByRole('status').first().innerText()));
 const ring = await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle);
 ok('the focused control shows a focus ring', ring !== 'none', ring);
 await row('Hyaline Casts').getByRole('button', { name: 'Enter the value for Hyaline Casts' }).click();

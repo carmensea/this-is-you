@@ -771,7 +771,7 @@ describe('the review table', () => {
     it('moves focus into a correction form, and Escape gives it back to the row unchanged', () => {
       const { backend } = open(three());
       fireEvent.click(screen.getByRole('button', { name: 'Enter the value for Hyaline Casts' }));
-      expect(document.activeElement).toBe(screen.getByLabelText('Test name'));
+      expect(document.activeElement).toBe(screen.getByLabelText('Value'));
       fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
       expect(screen.queryByText('Save and accept')).toBeNull();
       expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Hyaline Casts: no value read, needs a check/);

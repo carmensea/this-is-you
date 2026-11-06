@@ -202,7 +202,7 @@ A worker that hangs looks exactly like one that is busy, so a hung file waits un
 
 Numeric dates are read month first (03/11/2024 is 11 March), and this alone is not a reason for low confidence. A date that only works day first, such as 28/03/2024, is read that way. A two-digit year still gets a warning.
 
-Urine microscopy is read too: counts per field such as `0-2 /HPF`, printed as a range, and graded words such as Few, Rare or Moderate, which are kept as printed. A test name whose value could not be read is proposed with no value and the printed text quoted, so it is never silently dropped.
+Urinalysis color and clarity (Yellow, Amber, Clear, Slightly Cloudy, Turbid and similar) are read as printed, and only for a test named for color, clarity or appearance, so a word like Red is never taken as another test's result. Urine microscopy is read too: counts per field such as `0-2 /HPF`, printed as a range, and graded words such as Few, Rare or Moderate, which are kept as printed. A test name whose value could not be read is proposed with no value and the printed text quoted, so it is never silently dropped.
 
 ## Deleting a document
 

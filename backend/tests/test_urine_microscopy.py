@@ -121,3 +121,41 @@ def test_a_microscopy_table_in_a_real_pdf(tmp_path):
     path.write_bytes(pdfs.text_pdf(CELLS_PER_LINE))
     found = [(r["name"], r["value"], r["unit"], r["reference"]) for r in extract(path, Limits(), TODAY).lab_rows]
     assert found == RANGED
+
+
+# ---- Color and clarity: words that are results only where the test asks for an appearance
+
+APPEARANCE_CELLS = ["Fictional Family Health Portal", "Specimen Collected: 03/04/2025", "Component", "Your Value", "Standard Range",
+    "Color, Urine", "Yellow", "Yellow",
+    "Clarity, Urine", "Slightly Cloudy", "Clear",
+    "Specific Gravity", "1.015", "1.005 - 1.030"]
+APPEARANCE_ROWS = ["Fictional Family Health Portal", "Specimen Collected: 03/04/2025", "Component Your Value Standard Range",
+    "Color, Urine Dark Yellow Yellow",
+    "Appearance Turbid Clear",
+    "Specific Gravity 1.015 1.005 - 1.030"]
+
+
+def test_color_and_clarity_one_cell_per_line_keep_their_words_and_order():
+    assert [(r.name, r.value, r.reference) for r in rows(APPEARANCE_CELLS)] == [
+        ("Color, Urine", "Yellow", "Yellow"), ("Clarity, Urine", "Slightly Cloudy", "Clear"), ("Specific Gravity", "1.015", "1.005-1.030")]
+
+
+def test_color_and_appearance_one_row_per_line():
+    assert [(r.name, r.value, r.reference) for r in rows(APPEARANCE_ROWS)] == [
+        ("Color, Urine", "Dark Yellow", "Yellow"), ("Appearance", "Turbid", "Clear"), ("Specific Gravity", "1.015", "1.005-1.030")]
+
+
+def test_color_and_clarity_keep_their_source_and_say_they_are_words():
+    color = rows(APPEARANCE_CELLS)[0]
+    assert color.source == "Color, Urine | Yellow | Yellow" and color.page == 1 and color.line > 0
+    assert any("word rather than a number" in i for i in color.issues)
+
+
+def test_a_color_word_is_never_a_result_for_another_test_or_a_test_name():
+    found = rows(["Fictional Family Health Portal", "Component", "Your Value", "Standard Range",
+                  "Bilirubin, Urine", "Amber", "Red", "Bacteria", "Few", "Urine Color Chart", "Color may vary with what you drink.", "Brown"])
+    assert [(r.name, r.value) for r in found] == [("Bacteria", "Few")]
+
+
+def test_a_color_row_outside_a_results_table_is_not_proposed():
+    assert rows(["Fictional Family Health Portal", "Eye Color Brown", "Hair Color Red"]) == []

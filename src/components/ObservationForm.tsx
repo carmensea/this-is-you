@@ -69,6 +69,7 @@ export function ObservationForm({
             <input
               type={f.type}
               list={f.key === 'reported_name' ? 'lab-test-names' : undefined}
+              data-field={f.key}
               value={draft[f.key]}
               onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
               style={inputStyle}

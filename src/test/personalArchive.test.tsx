@@ -297,6 +297,16 @@ describe('the review workflow', () => {
     await act(async () => { fireEvent.click(screen.getByText('Save correction')); });
     expect(backend.decide).toHaveBeenCalledWith(dto().id, 'provider', { action: 'corrected', value: 'Fictional Lab' });
   });
+  it('puts the focus in a detail editor, and Escape closes it and gives the focus back', () => {
+    const { backend, container } = open();
+    fireEvent.click(screen.getAllByText('Correct')[1]);
+    const input = container.querySelector('input[type=date]') as HTMLInputElement;
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(container.querySelector('input[type=date]')).toBeNull();
+    expect(document.activeElement?.textContent).toBe('Correct');
+    expect(backend.decide).not.toHaveBeenCalled();
+  });
   it('cannot continue until every detail is decided', () => {
     open();
     expect((screen.getByText('Continue to confirmation') as HTMLButtonElement).disabled).toBe(true);
