@@ -128,6 +128,17 @@ describe('only verified results are published', () => {
     const different = archiveWith([fromReport, { ...fromProvider, value_text: '119', value_number: 119 }]);
     expect(different.markers.find((m) => m.key === 'ldl')!.results).toHaveLength(2);
   });
+  it('keeps genuinely separate measurements apart: another test, another day or another unit is another point', () => {
+    const base = obs({ id: 'r'.repeat(32), origin: 'extracted', value_text: '118', value_number: 118 });
+    const points = (other: Partial<LabObservation>) => {
+      const archive = archiveWith([base, obs({ id: 'p'.repeat(32), origin: 'fhir', document_id: null, value_text: '118', value_number: 118, ...other })]);
+      return archive.markers.flatMap((m) => m.results).length;
+    };
+    expect(points({})).toBe(1);
+    expect(points({ test_code: 'hdl', reported_name: 'HDL Cholesterol', test_name: 'HDL cholesterol', test_short: 'HDL' })).toBe(2);
+    expect(points({ collected_on: '2020-06-16' })).toBe(2);
+    expect(points({ unit: 'mmol/L', display_unit: 'mmol/L' })).toBe(2);
+  });
   it('leaves out proposed and rejected results', () => {
     const a = archiveWith([
       obs({ verification_status: 'proposed' }),
