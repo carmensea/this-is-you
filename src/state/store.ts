@@ -51,6 +51,14 @@ export interface ReviewRecord {
   lines: Record<string, ReviewPatch>;
   fields: Record<string, ReviewPatch>;
 }
+/** A place in the original to show. */
+export interface PdfTarget {
+  page: number;
+  text: string;
+  value: string;
+  at: number;
+}
+
 export interface ReviewDraft {
   value?: string;
   unit?: string;
@@ -108,7 +116,10 @@ export interface AppState {
   rvEdit: string | null;
   rvDraft: ReviewDraft;
   rvStage: 'review' | 'confirm' | 'done';
-  rvFilter: 'all' | 'attention' | 'done';
+  /** The measurement whose actions and source are shown. rvLine is the one selected. */
+  rvOpen: string | null;
+  /** Document details shown or hidden by the person. Null follows whether any is undecided. */
+  rvDetailsOpen: boolean | null;
   /** The saved import report, which outlasts the browser. */
   report: ReportState;
   /** The last refresh failed, so what is on screen may be out of date. It is not cleared or replaced. */
@@ -125,7 +136,8 @@ export interface AppState {
   rvError: string | null;
   rvGroupError: string | null;
   /** The page of the original to show, when following a proposal back to its source. */
-  rvSourcePage: number | null;
+  /** Where the original should show: a page, and the line on it when known. `at` repeats a request for the same place. */
+  rvPdfTarget: PdfTarget | null;
   /** The add-a-measurement form on the review screen. */
   rvAdding: boolean;
   /** Which page of a document's original the Documents screen should show. */
@@ -194,10 +206,11 @@ export const initialState: AppState = {
   rvEdit: null,
   rvDraft: {},
   rvStage: 'review',
-  rvFilter: 'all',
+  rvOpen: null,
+  rvDetailsOpen: null,
   rvError: null,
   rvGroupError: null,
-  rvSourcePage: null,
+  rvPdfTarget: null,
   rvAdding: false,
   dSource: null,
   manualOpen: false,
@@ -413,10 +426,11 @@ export class AppStore {
       rvStage: 'review',
       rvLine: null,
       rvEdit: null,
-      rvFilter: 'all',
+      rvOpen: null,
+      rvDetailsOpen: null,
       rvError: null,
       rvGroupError: null,
-      rvSourcePage: null,
+      rvPdfTarget: null,
       rvAdding: false,
       ...extra,
     });
@@ -629,15 +643,20 @@ export class AppStore {
       manualOpen: false,
     });
 
-  /** A person retyping their own entry is approving it, so the correction goes straight back on the charts. */
-  correctManual = (id: string, fields: ObservationFieldValues) =>
+  private correctThenVerify = (id: string, fields: ObservationFieldValues, after: Partial<AppState>) =>
     this.attempt(
       async (backend) => {
         await backend.correctObservation(id, fields);
         await backend.setObservationStatus(id, 'verify');
       },
-      { manualEdit: null },
+      after,
     );
+
+  /** A person retyping their own entry is approving it, so the correction goes straight back on the charts. */
+  correctManual = (id: string, fields: ObservationFieldValues) => this.correctThenVerify(id, fields, { manualEdit: null });
+
+  /** "Save and accept" in review: the person typed it from the original, and says so with that button. */
+  correctAndAccept = (id: string, fields: ObservationFieldValues) => this.correctThenVerify(id, fields, { rvEdit: null, rvOpen: null });
 
   /** Checks back while any document is still being read. */
   watchReading = () => {

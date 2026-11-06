@@ -45,9 +45,9 @@ describe('review', () => {
     store.openReview(id);
     expect(reviewVM(store)!.rvContinueDisabled).toBe(true);
 
-    reviewVM(store)!.rvLines.filter(l => !l.isLow).forEach(l => l.onConfirm());
+    reviewVM(store)!.rvLines.filter(l => !l.hasProblem).forEach(l => l.onAccept());
     reviewVM(store)!.rvFields.forEach(f => f.onConfirm());
-    reviewVM(store)!.rvLines.filter(l => l.isLow).forEach(l => l.onExclude());
+    reviewVM(store)!.rvLines.filter(l => l.hasProblem).forEach(l => l.onReject());
     const v = reviewVM(store)!;
     expect(v.rvContinueDisabled).toBe(false);
 

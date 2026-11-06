@@ -33,6 +33,8 @@ _SPELLINGS.update({_prefix + "/l": BILLIONS_PER_L for _prefix in ("x10e9", "x10^
 _SPELLINGS.update({_prefix + "/l": TRILLIONS_PER_L for _prefix in ("x10e12", "x10^12", "10^12", "10*12", "10e12", "x1012", "x10(12)", "x10*12")})
 _SPELLINGS.update({"cells" + _volume: CELLS for _volume in _MICROLITRE})
 _SPELLINGS.update({_volume: CELLS for _volume in _MICROLITRE})
+# Cells counted per microscope field in urine sediment.
+_SPELLINGS.update({"/hpf": "/HPF", "/lpf": "/LPF"})
 _SPELLINGS.update({"gm/dl": "g/dL", "/100 wbc": "/100 WBC", "/100wbc": "/100 WBC", "%wbc": "%"})
 UNIT_WORDS = frozenset(_SPELLINGS)
 

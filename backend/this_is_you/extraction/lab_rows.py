@@ -12,7 +12,7 @@ Two shapes are understood:
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 
 from ..lab_catalog import UNIT_WORDS, canonical_unit, find_test, longest_known_prefix, needs_unit
@@ -35,8 +35,29 @@ _NOISE_START = re.compile(r"^(page|phone|fax|tel|dob|mrn|id|account|acct|suite|z
 _TABLE_NOISE_START = re.compile(r"^(results?|components?|standard|normal|reference|ref|value|your|flag|units?|comments?|notes?|interpretation|narrative|ordered|ordering|authorizing|authorized|provider|performing|performed|lab|laboratory|site|location|released|printed|view|sent|resulted|see|this|the|please|if|for|from|by|and|or|no|not|test|tests)\b", re.I)
 # A per-volume unit this app has no spelling for is still printed as one, and is kept exactly as printed. Only inside a table.
 _UNIT_SHAPE = re.compile(r"^(?:x?10[\^*eE(]?\d+\)?|[a-zA-Zµμ]{1,8})/(?:u|µ|μ|mc|m|d|n|p|f)?[Ll]$")
-_WORD_RESULTS = {"negative", "positive", "normal", "abnormal", "none seen", "not detected", "detected", "nonreactive", "non-reactive", "reactive", "trace"}
-_WORD_RANGE_STARTS = re.compile(r"^(not estab|see below|see note|negative|none seen|not detected|nonreactive|non-reactive|normal)", re.I)
+_WORD_RESULTS = {
+    "negative", "positive", "normal", "abnormal", "none seen", "not detected", "detected", "nonreactive", "non-reactive", "reactive", "trace",
+    # Graded amounts, as urine sediment is reported.
+    "none", "not seen", "rare", "few", "occasional", "moderate", "many", "marked", "present", "absent", "too numerous to count", "tntc",
+    "1+", "2+", "3+", "4+",
+}
+_WORD_RANGE_STARTS = re.compile(r"^(not estab|see below|see note|negative|none seen|not seen|none|absent|not detected|nonreactive|non-reactive|normal)", re.I)
+# Color and clarity are words too, but only for a test that asks for an appearance: "Red" is no answer to anything else.
+_APPEARANCE_WORDS = {
+    "yellow", "pale yellow", "light yellow", "dark yellow", "straw", "amber", "dark amber", "colorless", "colourless", "red", "orange", "brown", "green", "pink",
+    "clear", "slightly cloudy", "cloudy", "hazy", "slightly hazy", "turbid", "slightly turbid",
+}
+_APPEARANCE_NAME = re.compile(r"\b(colou?r|clarity|appearance|turbidity)\b", re.I)
+_APPEARANCE_ROW = re.compile(r"^(.+?)\s+(" + "|".join(sorted(map(re.escape, _APPEARANCE_WORDS), key=len, reverse=True)) + r")(?:\s+(.+))?$", re.I)
+
+
+def _is_appearance(name: str, text: str) -> bool:
+    return text.lower() in _APPEARANCE_WORDS and bool(_APPEARANCE_NAME.search(name))
+
+
+# A whole row whose result is a word: "Bacteria None seen None seen". The name is the shortest start that leaves a known word.
+_WORD_ROW = re.compile(r"^(.+?)\s+(" + "|".join(sorted(map(re.escape, _WORD_RESULTS), key=len, reverse=True)) + r")(?:\s+(.+))?$", re.I)
+_SENTENCE_VERBS = {"is", "are", "was", "were", "be", "been", "seen", "noted"}
 
 _COLLECTED = re.compile(r"\b(?:specimen collect(?:ed|ion)(?: date)?|collection date(?:/time)?|collection time|collected date|date collected|date of collection|date drawn|drawn(?: on)?|collected(?: on)?)\b", re.I)
 _SERVICE = re.compile(r"\b(?:date of service|service date)\b", re.I)
@@ -108,6 +129,7 @@ class _Cells:
     european: bool = False
     other_unit: str | None = None
     leftovers: int = 0
+    range_from_label: bool = False  # The reference came from a "Standard Range" label, so it is never the result.
 
 
 def _normalize_spacing(text: str) -> str:
@@ -126,6 +148,9 @@ def _read_words(words: list[str], cells: _Cells, table: bool) -> None:
                 cells.other_unit = word
         elif _RANGE_TOKEN.match(word) and cells.reference is None:
             cells.reference = word
+        elif table and _RANGE_TOKEN.match(word) and cells.value is None and not cells.range_from_label and _RANGE_TOKEN.match(cells.reference or ""):
+            # Two ranges and no value: the first, in the value column, is the result printed as a range ("0-2 /HPF").
+            cells.value, cells.reference = cells.reference, word
         elif _FLAG.match(word) and cells.flag is None and (cells.value is not None or len(word) <= 8):
             cells.flag = word.strip("[]()*")
         elif table and _FLAG.match(word) and cells.flag is not None:
@@ -167,7 +192,9 @@ def _assess(name: str, cells: _Cells, extra: list[str] | None = None) -> tuple[l
         issues.append(f"The value {value} uses a comma, which could be a decimal point or a thousands separator.")
     if value[:1] in ("<", ">", "≤", "≥"):
         issues.append("This value is reported as a limit rather than an exact number, so it will not be graphed.")
-    elif value and value.lower() in _WORD_RESULTS:
+    elif _RANGE_TOKEN.match(value):
+        issues.append("This result is printed as a range rather than one number, so it will not be graphed.")
+    elif value and (value.lower() in _WORD_RESULTS or _is_appearance(name, value)):
         issues.append("This result is a word rather than a number, so it will not be graphed.")
     return issues, LOW if issues or test is None else (HIGH if cells.reference else MEDIUM)
 
@@ -210,6 +237,7 @@ class _Pending:
     parts: list[str] = field(default_factory=list)
     last_page: int = 0
     expect: str | None = None
+    unread: str | None = None  # A cell under the name that could not be read. The name is kept, with no value.
 
     def has_anything(self) -> bool:
         c = self.cells
@@ -236,6 +264,28 @@ def _split_labels(text: str) -> list[tuple[str | None, str]]:
     return split
 
 
+def _word_row(line: Line, today: date) -> LabRow | None:
+    match = _WORD_ROW.match(line.text)
+    appearance = match is None or not _looks_like_name(match[1].strip(" .:;*"), today)
+    if appearance:
+        match = _APPEARANCE_ROW.match(line.text)
+        if not match or not _APPEARANCE_NAME.search(match[1]):
+            return None
+    name, rest = match[1].strip(" .:;*"), match[3]
+    if not _looks_like_name(name, today) or _SENTENCE_VERBS & set(name.lower().split()):
+        return None
+    if rest and not (_WORD_RANGE_STARTS.match(rest) or rest.lower() in _WORD_RESULTS or (appearance and _is_appearance(name, rest))):
+        return None
+    cells = _Cells(value=match[2], reference=rest[:60] if rest else None)
+    issues, confidence = _assess(name, cells)
+    return LabRow(name, cells.value, None, cells.reference, None, None, None, line.page, line.index + 1, line.text[:200], confidence, issues)
+
+
+def _unread_cell(text: str) -> bool:
+    """Short and shaped like a value, but not readable as one, such as "0-2/HPF0-5/HPF". Words are never taken for one."""
+    return (text[0].isdigit() or text[0] in "<>≤≥+-") and len(text.split()) <= 4 and not _DATE_LIKE.search(text)
+
+
 def _is_header(text: str) -> bool:
     return not _HEADER_WORDS.sub(" ", text).strip(" |:-")
 
@@ -243,7 +293,7 @@ def _is_header(text: str) -> bool:
 def _looks_like_name(text: str, today: date) -> bool:
     words = text.split()
     return (
-        len(words) <= 7 and len(text) <= 80 and words[0][0].isalpha() and ":" not in text and not text.endswith((".", "?", "!"))
+        len(words) <= 7 and len(text) <= 80 and words[0][0].isalpha() and text.lower() not in _WORD_RESULTS and text.lower() not in _APPEARANCE_WORDS and ":" not in text and not text.endswith((".", "?", "!"))
         and not _NOISE_START.match(words[0]) and not _TABLE_NOISE_START.match(words[0]) and not find_dates(text, today) and not _DATE_LIKE.search(text)
     )
 
@@ -256,6 +306,7 @@ def _into(pending: _Pending, slot: str | None, text: str) -> bool:
     normalized = _normalize_spacing(text)
     cells = pending.cells
     if slot == "range" and cells.reference is None:
+        cells.range_from_label = True
         words = normalized.split()
         # What follows the numbers can only be a unit. Words stay as printed: "Not Estab." is a real answer.
         if not (_RANGE_TOKEN.match(words[0]) or _BOUND_TOKEN.match(words[0]) or _VALUE.match(words[0])):
@@ -266,14 +317,25 @@ def _into(pending: _Pending, slot: str | None, text: str) -> bool:
             _read_words(words[1:], unit_cells, True)
             cells.unit, cells.other_unit = unit_cells.unit, unit_cells.other_unit or cells.other_unit
             cells.flag = cells.flag or unit_cells.flag
+    elif slot == "value" and cells.value is None and _RANGE_TOKEN.match(normalized.split()[0]):
+        words = normalized.split()
+        unit_cells = _Cells(unit=cells.unit)
+        _read_words(words[1:], unit_cells, True)
+        if unit_cells.leftovers:
+            return False
+        cells.value, cells.unit = words[0], unit_cells.unit
     elif text.lower() in _WORD_RESULTS and (slot == "value" or cells.value is None):
         cells.value = text
+    elif _is_appearance(pending.name, text) and cells.value is None:
+        cells.value = text
+    elif _is_appearance(pending.name, text) and cells.reference is None:
+        cells.reference = text
     elif cells.value is not None and cells.reference is None and _WORD_RANGE_STARTS.match(text):
         cells.reference = text[:60]
     elif text.lower() == "normal" and cells.value is not None:
         pass  # A flag column saying nothing is wrong. Not a flag.
     else:
-        trial = _Cells(cells.value, cells.unit, cells.reference, cells.flag, list(cells.extra_numbers), cells.european, cells.other_unit)
+        trial = replace(cells, extra_numbers=list(cells.extra_numbers), leftovers=0)
         _read_words(normalized.split(), trial, True)
         if trial.leftovers:
             return False
@@ -320,10 +382,12 @@ def _rows_from_lines(lines: list[Line], today: date) -> list[LabRow]:
         nonlocal pending
         row, pending = pending, None
         # A heading such as "CBC with Differential" has a name and nothing else. A row needs at least something measured.
-        if row is None or not row.has_anything() or len(rows) >= MAX_ROWS:
+        if row is None or not (row.has_anything() or row.unread) or len(rows) >= MAX_ROWS:
             return
         extra = ["This result continues across a page break. Check the name and value belong together."] if row.last_page != row.first.page else []
         issues, confidence = _assess(row.name, row.cells, extra)
+        if row.unread:
+            issues = [f'The printed value could not be read: "{row.unread[:60]}". Enter it from the original.'] + [i for i in issues if not i.startswith("No value could be read")]
         c = row.cells
         add(LabRow(row.name, c.value or "", c.unit, c.reference, c.flag, None, None, row.first.page, row.first.index + 1, " | ".join(row.parts)[:200], confidence, issues))
 
@@ -390,7 +454,7 @@ def _rows_from_lines(lines: list[Line], today: date) -> list[LabRow]:
             continue
 
         # A whole row on one line.
-        row = _parse_row(line, today, table=True)
+        row = _parse_row(line, today, table=True) or _word_row(line, today)
         if row is not None:
             finish_pending()
             add(row)
@@ -401,6 +465,11 @@ def _rows_from_lines(lines: list[Line], today: date) -> list[LabRow]:
             if _into(pending, expected, line.text) if (expected or pending.has_anything()) else _into(pending, None, line.text):
                 pending.parts.append(line.text)
                 pending.last_page = line.page
+                continue
+            if not pending.has_anything() and _unread_cell(line.text):
+                pending.unread = line.text
+                pending.parts.append(line.text)
+                finish_pending()
                 continue
         elif _DATE_LIKE.search(line.text) or line.text[0].isdigit() or line.text[0] in "<>≤≥":
             continue  # A cell with no test name above it. There is no telling what it belongs to.

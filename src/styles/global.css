@@ -17,6 +17,11 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #3D6A52; out
 
 .snapshot-pair { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
 
+/* The original stays in view beside the review only when the two sit side by side. Stacked, it scrolls away. */
+@media (min-width: 1140px) {
+  .review-original { position: sticky; top: 0; }
+}
+
 @media (max-width: 760px) {
   .snapshot-pair { grid-template-columns: minmax(0, 1fr); }
 }

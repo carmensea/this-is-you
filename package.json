@@ -18,7 +18,7 @@
     "perf:compare": "node tools/perf/compare.mjs",
     "readiness": "node tools/readiness/run.mjs",
     "readiness:dev": "node tools/readiness/devflow.mjs",
-    "readiness:review": "node tools/readiness/review-groups.mjs",
+    "readiness:review": "node tools/readiness/review-flow.mjs",
     "readiness:recovery": "node tools/readiness/import-recovery.mjs",
     "readiness:delete": "node tools/readiness/delete-document.mjs",
     "readiness:viewer": "node tools/readiness/original-viewer.mjs",

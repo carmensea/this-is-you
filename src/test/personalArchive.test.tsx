@@ -243,7 +243,7 @@ describe('the review workflow', () => {
   });
   it('edits a date with a date input and saves the correction', async () => {
     const { backend, container } = open();
-    fireEvent.click(screen.getAllByText('Edit')[1]);
+    fireEvent.click(screen.getAllByText('Correct')[1]);
     const input = container.querySelector('input[type=date]') as HTMLInputElement;
     expect(input.value).toBe('2024-03-11');
     fireEvent.change(input, { target: { value: '2024-11-03' } });
@@ -252,7 +252,7 @@ describe('the review workflow', () => {
   });
   it('edits the type by choosing from the known types', async () => {
     const { backend } = open();
-    fireEvent.click(screen.getAllByText('Edit')[0]);
+    fireEvent.click(screen.getAllByText('Correct')[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Imaging report' }));
     await act(async () => { fireEvent.click(screen.getByText('Save correction')); });
     expect(backend.decide).toHaveBeenCalledWith(dto().id, 'document_type', { action: 'corrected', value: 'imaging' });
@@ -265,7 +265,7 @@ describe('the review workflow', () => {
   it('shows a refused save and keeps the editor open', async () => {
     const { backend } = open();
     backend.decide = vi.fn(async () => { throw new ArchiveRequestError('The date must be between 1900 and today.', 'invalid_value'); });
-    fireEvent.click(screen.getAllByText('Edit')[1]);
+    fireEvent.click(screen.getAllByText('Correct')[1]);
     await act(async () => { fireEvent.click(screen.getByText('Save correction')); });
     expect(screen.getByRole('alert').textContent).toContain('between 1900 and today');
     expect(screen.getByText('Save correction')).toBeTruthy();
@@ -276,6 +276,36 @@ describe('the review workflow', () => {
     await act(async () => { fireEvent.click(screen.getAllByText('Confirm')[0]); });
     expect(backend.listDocuments).toHaveBeenCalled();
     expect(screen.getByRole('alert').textContent).toContain('This proposal has changed');
+  });
+  it('folds the details away once all are decided, and shows them again on request', () => {
+    const decided = { document_type: field('confirmed', 'lab'), service_date: field('confirmed', '2024-03-11'), provider: field('not_stated'), report_title: field('corrected', 'A Title') };
+    mount({ view: 'import', rvDoc: dto().id, rvStage: 'review' }, [dto({ metadata: decided })], backendWith());
+    const details = screen.getByRole('region', { name: 'Document details' });
+    expect(details.textContent).toContain('All 4 decided, 1 corrected by you');
+    expect(screen.queryByText('Correct')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    expect(details.textContent).toContain('Corrected by you');
+    expect(details.textContent).toContain('Marked not stated');
+  });
+  it('changes a decided detail as a new decision, never by erasing the old one', async () => {
+    const backend = backendWith();
+    const decided = { document_type: field('confirmed', 'lab'), service_date: field('confirmed', '2024-03-11'), provider: field('not_stated'), report_title: field('corrected', 'A Title') };
+    mount({ view: 'import', rvDoc: dto().id, rvStage: 'review', rvDetailsOpen: true }, [dto({ metadata: decided })], backend);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change' })[2]);
+    fireEvent.click(screen.getByRole('button', { name: 'Correct' }));
+    fireEvent.change(screen.getByLabelText('Corrected value'), { target: { value: 'Fictional Lab' } });
+    await act(async () => { fireEvent.click(screen.getByText('Save correction')); });
+    expect(backend.decide).toHaveBeenCalledWith(dto().id, 'provider', { action: 'corrected', value: 'Fictional Lab' });
+  });
+  it('puts the focus in a detail editor, and Escape closes it and gives the focus back', () => {
+    const { backend, container } = open();
+    fireEvent.click(screen.getAllByText('Correct')[1]);
+    const input = container.querySelector('input[type=date]') as HTMLInputElement;
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(container.querySelector('input[type=date]')).toBeNull();
+    expect(document.activeElement?.textContent).toBe('Correct');
+    expect(backend.decide).not.toHaveBeenCalled();
   });
   it('cannot continue until every detail is decided', () => {
     open();
