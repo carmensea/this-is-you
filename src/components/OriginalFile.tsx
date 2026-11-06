@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
 import { openPdf, stopPdfWorker, type PdfFile } from '../services/pdfViewer';
 import { WorkerLost } from '../services/pdfWorker';
+import type { PageBox } from '../domain/locateRow';
+import type { PdfTarget } from '../state/store';
 import { C } from '../theme';
 import { s } from './styles';
 
@@ -9,6 +11,8 @@ const LENS_ZOOM = 2.5;
 const MAX_PIXEL_WIDTH = 3000;
 const NEAR = '800px';
 const SLOW_MS = 15_000;
+const ZOOMS = [0.75, 1, 1.25, 1.5, 2, 3]; // Of the panel's width. 1 fits the page to it.
+const FIT = 1;
 
 const canHover = () => window.matchMedia?.('(hover: hover)').matches ?? true;
 
@@ -34,9 +38,11 @@ interface PageProps {
   onOpen?: (page: number) => void;
   onFail: (problem?: unknown) => void;
   onDrawing?: (change: number) => void;
+  /** The source line to show, as fractions of the page. */
+  mark?: PageBox | null;
 }
 
-function Page({ pdf, page, width, title, scroller, lens, onOpen, onFail, onDrawing }: PageProps) {
+function Page({ pdf, page, width, title, scroller, lens, onOpen, onFail, onDrawing, mark }: PageProps) {
   const holder = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const near = useNear(holder, scroller);
@@ -83,17 +89,26 @@ function Page({ pdf, page, width, title, scroller, lens, onOpen, onFail, onDrawi
   const sheet = (
     <canvas ref={canvas} role="img" aria-label={`Page ${page} of ${pdf.pages}, ${title}`} style={{ display: 'block', width: '100%', height: '100%' }} />
   );
-  const size = { display: 'block', width, height: Math.round(width * pdf.ratio(page)), padding: 0, background: '#FFFEFB', border: 0 };
+  const size = { display: 'block', position: 'relative' as const, width, height: Math.round(width * pdf.ratio(page)), padding: 0, background: '#FFFEFB', border: 0 };
+  const highlight = mark && (
+    <span
+      data-source-mark
+      aria-hidden="true"
+      style={{ position: 'absolute', left: `${(mark.left - 0.006) * 100}%`, top: `${(mark.top - 0.004) * 100}%`, width: `${(mark.right - mark.left + 0.012) * 100}%`, height: `${(mark.bottom - mark.top + 0.008) * 100}%`, background: C.greenT, mixBlendMode: 'multiply', outline: `1px solid ${C.green}`, pointerEvents: 'none' }}
+    />
+  );
   const hover = { onPointerMove: moveLens, onPointerLeave: hideLens };
   return (
     <div ref={holder} data-pdf-page={page}>
       {onOpen ? (
         <button aria-label={`Open page ${page} larger`} onClick={() => { hideLens(); onOpen(page); }} style={{ ...size, cursor: 'zoom-in' }} {...hover}>
           {sheet}
+          {highlight}
         </button>
       ) : (
         <div style={{ ...size, cursor: 'zoom-in' }} {...hover}>
           {sheet}
+          {highlight}
         </div>
       )}
       <p style={{ margin: '4px 0 12px', fontSize: 11, color: C.ink3, textAlign: 'center' }}>
@@ -111,12 +126,17 @@ interface PagesProps {
   onOpen?: (page: number) => void;
   onFail: (problem?: unknown) => void;
   onDrawing?: (change: number) => void;
+  target?: PdfTarget | null;
 }
 
-function Pages({ pdf, title, startPage, height, onOpen, onFail, onDrawing }: PagesProps) {
+function Pages({ pdf, title, startPage, height, onOpen, onFail, onDrawing, target }: PagesProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const lens = useRef<HTMLCanvasElement>(null);
-  const [width, setWidth] = useState(0);
+  const [fitWidth, setWidth] = useState(0);
+  const [zoom, setZoom] = useState(FIT);
+  const width = Math.round(fitWidth * zoom);
+  const [mark, setMark] = useState<{ page: number; box: PageBox } | null>(null);
+  const [missed, setMissed] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const box = scroller.current;
@@ -135,11 +155,42 @@ function Pages({ pdf, title, startPage, height, onOpen, onFail, onDrawing }: Pag
     if (box && target && width) box.scrollTop = target.offsetTop;
   }, [startPage, width]);
 
+  // The selected source: its page in view, and its line marked and brought to the upper third, when the page's text can say where.
+  useEffect(() => {
+    const box = scroller.current;
+    if (!target || !width || !box) return;
+    let live = true;
+    const show = (row: PageBox | null) => {
+      const sheet = box.querySelector<HTMLElement>(`[data-pdf-page="${target.page}"]`);
+      if (!live || !sheet) return;
+      setMark(row ? { page: target.page, box: row } : null);
+      setMissed(row || !target.text ? null : target.page);
+      const pageHeight = Math.round(width * pdf.ratio(target.page));
+      box.scrollTop = Math.max(0, sheet.offsetTop + (row ? row.top * pageHeight - box.clientHeight / 3 : 0));
+      if (zoom > FIT) box.scrollLeft = row ? Math.max(0, row.left * width - 24) : 0;
+    };
+    if (!target.text) show(null);
+    else pdf.findRow(target.page, target.text, target.value).then(show, () => show(null));
+    return () => {
+      live = false;
+    };
+  }, [pdf, target, width, zoom]);
+
+  const step = (by: number) => setZoom((now) => ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, ZOOMS.indexOf(now) + by))]);
+
   return (
-    <div ref={scroller} style={{ position: 'relative', height, overflowY: 'auto', overflowX: 'hidden' }} onScroll={() => { if (lens.current) lens.current.style.display = 'none'; }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height }}>
+    <div role="toolbar" aria-label="Zoom" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '6px 10px', borderBottom: `1px solid ${C.rule2}`, fontSize: 12, flexWrap: 'wrap' }}>
+      <button onClick={() => step(-1)} disabled={zoom === ZOOMS[0]} aria-label="Zoom out" style={{ ...s.stepBtn8, border: `1px solid ${C.rule}` }}>−</button>
+      <span aria-live="polite" style={{ ...s.monoNote, minWidth: 40, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+      <button onClick={() => step(1)} disabled={zoom === ZOOMS[ZOOMS.length - 1]} aria-label="Zoom in" style={{ ...s.stepBtn8, border: `1px solid ${C.rule}` }}>+</button>
+      <button onClick={() => setZoom(FIT)} disabled={zoom === FIT} style={s.link12}>Fit width</button>
+      {missed !== null && <span role="status" style={{ color: C.ink3 }}>That line could not be found in the page's text, so page {missed} is shown.</span>}
+    </div>
+    <div ref={scroller} style={{ position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', overflowX: zoom > FIT ? 'auto' : 'hidden' }} onScroll={() => { if (lens.current) lens.current.style.display = 'none'; }}>
       {width > 0 &&
         Array.from({ length: pdf.pages }, (_, i) => (
-          <Page key={i + 1} pdf={pdf} page={i + 1} width={width} title={title} scroller={scroller} lens={lens} onOpen={onOpen} onFail={onFail} onDrawing={onDrawing} />
+          <Page key={i + 1} pdf={pdf} page={i + 1} width={width} title={title} scroller={scroller} lens={lens} onOpen={onOpen} onFail={onFail} onDrawing={onDrawing} mark={mark?.page === i + 1 ? mark.box : null} />
         ))}
       <canvas
         ref={lens}
@@ -147,6 +198,7 @@ function Pages({ pdf, title, startPage, height, onOpen, onFail, onDrawing }: Pag
         aria-hidden="true"
         style={{ display: 'none', position: 'fixed', width: LENS_SIZE, height: LENS_SIZE, border: `1px solid ${C.ink}`, background: '#FFFEFB', pointerEvents: 'none', zIndex: 10 }}
       />
+    </div>
     </div>
   );
 }
@@ -248,9 +300,10 @@ export function usePdf(file: string | null, wanted: boolean) {
 }
 
 /** The real stored file, drawn here with a magnifier. Clicking a page enlarges it in this tab. */
-export function OriginalFile({ title, url, height = 720 }: { title: string; url: string; height?: number }) {
+export function OriginalFile({ title, url, height = 720, target = null }: { title: string; url: string; height?: number | string; target?: PdfTarget | null }) {
   const [file, fragment] = url.split('#');
   const startPage = Number(fragment?.match(/^page=(\d+)$/)?.[1]) || null;
+  const shownPage = target?.page ?? startPage;
   const frame = useRef<HTMLDivElement>(null);
   const near = useNear(frame);
   const [wanted, setWanted] = useState(false);
@@ -277,19 +330,19 @@ export function OriginalFile({ title, url, height = 720 }: { title: string; url:
 
   return (
     <>
-      <div ref={frame} role="group" aria-label={`Original file: ${title}`} data-file={file} data-page={startPage ?? undefined} style={{ marginTop: 8, background: '#FFFEFB', border: `1px solid ${C.rule}`, minHeight: height }}>
+      <div ref={frame} role="group" aria-label={`Original file: ${title}`} data-file={file} data-page={shownPage ?? undefined} style={{ marginTop: 8, background: '#FFFEFB', border: `1px solid ${C.rule}`, minHeight: height }}>
         {failed ? (
           // The browser's own viewer, so a file this page cannot draw can still be read.
           <iframe key={url} title={`Original file: ${title}`} src={url} style={{ display: 'block', width: '100%', height, border: 0 }} />
         ) : pdf ? (
-          <Pages pdf={pdf} title={title} startPage={startPage} height={height} onOpen={setEnlarged} onFail={fail} onDrawing={onDrawing} />
+          <Pages pdf={pdf} title={title} startPage={startPage} height={height} onOpen={setEnlarged} onFail={fail} onDrawing={onDrawing} target={target} />
         ) : (
           <p style={{ margin: 0, padding: 14, fontSize: 12, color: C.ink3 }}>{reopening ? 'The viewer stopped, so this file is opening again.' : 'Loading the original.'}</p>
         )}
       </div>
       {pdf && !failed && enlarged !== null && <PageModal pdf={pdf} title={title} page={enlarged} onClose={() => setEnlarged(null)} onFail={fail} onDrawing={onDrawing} />}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', marginTop: 10, fontSize: 12 }}>
-        {pdf && !failed && <span style={{ color: C.ink3 }}>Hover to magnify. Click a page to enlarge it.</span>}
+        {pdf && !failed && <span style={{ color: C.ink3 }}>Scrolls on its own. Hover to magnify, click a page to enlarge it.</span>}
         {slow && !failed && (
           <span role="status" style={{ color: C.ink3 }}>
             Still working on this file. Large scans can take a few minutes.{' '}
