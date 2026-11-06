@@ -17,8 +17,8 @@ type Item = { status: string; conf: string; edited: boolean };
 export const REJECTED_TEXT =
   'Rejected. Left out of your verified records, and kept here and in the review history. Restore it to decide again.';
 
-function realLineStatus(real: DocumentReview, id: string): string {
-  const o = real.observations.find((x) => x.id === id);
+function realLineStatus(observations: LabObservation[], id: string): string {
+  const o = observations.find((x) => x.id === id);
   if (!o) return '';
   if (o.verification_status === 'verified' && o.approved_group_id)
     return `Accepted by you as part of a group on ${fShort(o.revisions[o.revisions.length - 1].occurred_at.slice(0, 10))}. Shown in Biomarkers if it has a collection date and an exact number.`;
@@ -28,8 +28,8 @@ function realLineStatus(real: DocumentReview, id: string): string {
   return o.confidence ? `Proposed, not verified · ${o.confidence} confidence` : 'Not yet accepted';
 }
 
-function realLineEditedText(real: DocumentReview, id: string): string {
-  const o = real.observations.find((x) => x.id === id);
+function realLineEditedText(observations: LabObservation[], id: string): string {
+  const o = observations.find((x) => x.id === id);
   if (!o) return '';
   const was = o.original;
   const first = [was.reported_name, was.value_text, was.unit].filter(Boolean).join(' ');
@@ -37,12 +37,19 @@ function realLineEditedText(real: DocumentReview, id: string): string {
 }
 
 /** What only a real measurement has: where it came from, its dates, and its form. */
-function lineExtras(store: AppStore, real: DocumentReview | undefined, id: string) {
-  const o = real?.observations.find((x) => x.id === id);
+function providerSource(o: LabObservation): string {
+  const r = o.source_resource;
+  if (!r) return o.source_text ?? '';
+  const version = `version ${r.version_number} of ${r.versions_kept} kept${r.version_id ? `, the provider's version ${r.version_id}` : ''}`;
+  return `Read from ${r.provider ?? 'a provider'}: ${r.resource_type} ${r.fhir_id}, ${version}, received ${fShort(r.fetched_at.slice(0, 10))}. Every version is kept as received.`;
+}
+
+function lineExtras(store: AppStore, observations: LabObservation[] | undefined, id: string) {
+  const o = observations?.find((x) => x.id === id);
   const when = (label: string, d: string | null | undefined) => `${label} ${d ? fShort(d) : 'unknown'}`;
   return {
     observation: o,
-    realEditedText: real && o?.edited ? realLineEditedText(real, id) : '',
+    realEditedText: observations && o?.edited ? realLineEditedText(observations, id) : '',
     dates: o
       ? [when('Collected', o.collected_on), when('Reported', o.reported_on), when('Documented', o.documented_on)].join(
           ' · ',
@@ -54,7 +61,9 @@ function lineExtras(store: AppStore, real: DocumentReview | undefined, id: strin
         ? `Source, page ${o.source_page}, line ${o.source_line}: "${o.source_text}"`
         : o.origin === 'manual'
           ? 'User-entered, not read from this document'
-          : '',
+          : o.origin === 'fhir'
+            ? providerSource(o)
+            : '',
     evidencePage: o?.source_page ?? 0,
     pdfTarget: o?.source_page ? { page: o.source_page, text: o.source_text ?? '', value: o.value_text } : null,
     duplicateNote: o?.possible_duplicates.length
@@ -122,60 +131,32 @@ function fieldExtras(store: AppStore, id: string, key: string, real: DocumentRev
   };
 }
 
-export function reviewVM(store: AppStore) {
-  const archive = store.archive,
-    s = store.state;
-  const id = s.rvDoc;
-  if (!id || !archive.documentsById[id]) return null;
-  const real = archive.documentsById[id].review;
-  const d = archive.documentsById[id],
-    x = store.reviewData(id),
-    rs = (s.rv || {})[id] || { lines: {}, fields: {} };
-  const L = x.lines.map((l) => ({
-    status: 'pending',
-    edited: false,
-    ...l,
-    ...rs.lines[l.key],
-    orig: l,
-    label: undefined as string | undefined,
-  }));
-  const F = x.fields.map((l) => ({
-    status: 'pending',
-    edited: false,
-    ...l,
-    ...rs.fields[l.key],
-    orig: { ...l, unit: '', ref: '' },
-    measure: undefined as string | undefined,
-    unit: '',
-    ref: '',
-  }));
-  const all = [...L, ...F],
-    pending = all.filter((l) => l.status === 'pending').length;
-  const conf = L.filter((l) => l.status === 'confirmed').length,
-    exc = L.filter((l) => l.status === 'excluded').length,
-    edt = all.filter((l) => l.edited).length;
-  const linesLeft = L.filter((l) => l.status === 'pending').length;
-  const fieldsLeft = F.filter((l) => l.status === 'pending').length;
+export type ResultInput = {
+  key: string;
+  measure: string;
+  value: string;
+  unit: string;
+  ref: string;
+  flag: string;
+  conf: string;
+  reason: string;
+  status: string;
+  edited: boolean;
+  orig: { value: string; unit: string; ref: string; flag: string };
+};
+
+/** Rows of results to decide one at a time, for a document or a provider. With observations, every decision goes to the
+ *  service and its history; without them (the demo), it stays in this browser. */
+export function resultLines(store: AppStore, L: ResultInput[], observations: LabObservation[] | undefined, demoId: string) {
+  const s = store.state;
   const dr = s.rvDraft;
+  const editKey = s.rvEdit;
   const seg = (on: boolean) => ({ bg: on ? C.ink : C.paper, fg: on ? C.paper : C.ink, pressed: !!on });
   const stText = (l: Item) =>
-    l.status === 'confirmed'
-      ? l.edited
-        ? 'Corrected and accepted.'
-        : 'Accepted.'
-      : l.status === 'excluded'
-        ? REJECTED_TEXT
-        : 'Proposed, not verified.';
-  const approvedTogether = new Map<string, LabObservation[]>();
-  for (const o of real?.observations ?? []) {
-    if (o.approved_group_id) approvedTogether.set(o.approved_group_id, [...(approvedTogether.get(o.approved_group_id) ?? []), o]);
-  }
-  const countAndDate = (rows: LabObservation[]) =>
-    `${plural(rows.length, 'result')}${rows[0].collected_on ? ` collected ${fLong(rows[0].collected_on)}` : ', collection date unknown'}`;
-  const editKey = s.rvEdit;
+    l.status === 'confirmed' ? (l.edited ? 'Corrected and accepted.' : 'Accepted.') : l.status === 'excluded' ? REJECTED_TEXT : 'Proposed, not verified.';
   const order = L.map((l) => ({ key: l.key, pending: l.status === 'pending' }));
   const pdfTargetOf = (key: string | null) => {
-    const o = key ? real?.observations.find((x) => x.id === key) : undefined;
+    const o = key ? observations?.find((x) => x.id === key) : undefined;
     return o?.source_page ? { page: o.source_page, text: o.source_text ?? '', value: o.value_text, at: Date.now() } : null;
   };
   /** Selects a row, and shows its line in the original. Nothing is decided by selecting. */
@@ -185,7 +166,7 @@ export function reviewVM(store: AppStore) {
   const decided = (key: string) => select(nextPending(order, key) ?? key, { rvOpen: null, rvEdit: null });
 
   const lines = L.map((l) => {
-    const extras = lineExtras(store, real, l.key);
+    const extras = lineExtras(store, observations, l.key);
     const o = extras.observation;
     const kind: RowKind = rowKind(l.value);
     const { problems, notes } = splitIssues(o ? o.issues : l.reason ? [l.reason] : [], kind, o ? !!o.test_code : true);
@@ -198,18 +179,18 @@ export function reviewVM(store: AppStore) {
     const isEditing = editKey === l.key;
     const accept = () => {
       decided(l.key);
-      if (real) void store.setObservationStatus(l.key, 'verify');
-      else store.patchReview(id, 'lines', l.key, { status: 'confirmed' });
+      if (observations) void store.setObservationStatus(l.key, 'verify');
+      else store.patchReview(demoId, 'lines', l.key, { status: 'confirmed' });
     };
     const reject = () => {
       decided(l.key);
-      if (real) void store.setObservationStatus(l.key, 'reject');
-      else store.patchReview(id, 'lines', l.key, { status: 'excluded' });
+      if (observations) void store.setObservationStatus(l.key, 'reject');
+      else store.patchReview(demoId, 'lines', l.key, { status: 'excluded' });
     };
     const undo = () => {
       select(l.key);
-      if (real) void store.setObservationStatus(l.key, 'reopen');
-      else store.patchReview(id, 'lines', l.key, { status: 'pending' });
+      if (observations) void store.setObservationStatus(l.key, 'reopen');
+      else store.patchReview(demoId, 'lines', l.key, { status: 'pending' });
     };
     const edit = () =>
       select(l.key, {
@@ -260,7 +241,7 @@ export function reviewVM(store: AppStore) {
       canAcceptAsRead: isPending && kind !== 'missing' && needsLook && !isEditing,
       canCorrect: !isEditing && !isRejected,
       correctLabel: kind === 'missing' ? 'Enter value' : 'Correct',
-      statusText: real ? realLineStatus(real, l.key) : stText(l),
+      statusText: observations ? realLineStatus(observations, l.key) : stText(l),
       editedText:
         'Extracted as ' +
         l.orig.value +
@@ -310,7 +291,7 @@ export function reviewVM(store: AppStore) {
         if (!(dd.value ?? '').trim()) return;
         const ch =
           dd.value !== l.orig.value || dd.unit !== l.orig.unit || dd.ref !== l.orig.ref || (dd.flag || '') !== l.orig.flag;
-        store.patchReview(id, 'lines', l.key, {
+        store.patchReview(demoId, 'lines', l.key, {
           status: 'confirmed',
           value: dd.value,
           unit: dd.unit,
@@ -323,6 +304,99 @@ export function reviewVM(store: AppStore) {
       onCancel: () => store.setState({ rvEdit: null }),
     });
   });
+
+  const byKey = (key: string | null) => lines.find((l) => l.key === key);
+  /** One key, already known not to come from typing. Says which row it moved to, if any. */
+  const keys = (key: string): string | null | undefined => {
+    const cur = byKey(store.state.rvLine) ?? lines[0];
+    if (!cur) return undefined;
+    const i = lines.indexOf(cur);
+    if (key === 'ArrowDown' || key === 'j') {
+      const next = lines[Math.min(lines.length - 1, i + 1)];
+      select(next.key, { rvOpen: null, rvEdit: null });
+      return next.key;
+    }
+    if (key === 'ArrowUp' || key === 'k') {
+      const prev = lines[Math.max(0, i - 1)];
+      select(prev.key, { rvOpen: null, rvEdit: null });
+      return prev.key;
+    }
+    if (key === 'a' || key === 'A') {
+      if (!cur.isPending) return undefined;
+      cur.primary.act();
+      return cur.primary.tone === 'accept' ? (nextPending(order, cur.key) ?? cur.key) : cur.key;
+    }
+    if (key === 'r' || key === 'R') {
+      if (!cur.isPending) return undefined;
+      cur.onReject();
+      return nextPending(order, cur.key) ?? cur.key;
+    }
+    if (key === 'u' || key === 'U') {
+      if (cur.isPending) return undefined;
+      cur.onUndo();
+      return cur.key;
+    }
+    if (key === 'c' || key === 'C') {
+      if (cur.isRejected) return undefined;
+      cur.onEdit();
+      return null; // Focus goes to the form, not a row.
+    }
+    return undefined;
+  };
+  return { lines, order, select, keys };
+}
+
+export function reviewVM(store: AppStore) {
+  const archive = store.archive,
+    s = store.state;
+  const id = s.rvDoc;
+  if (!id || !archive.documentsById[id]) return null;
+  const real = archive.documentsById[id].review;
+  const d = archive.documentsById[id],
+    x = store.reviewData(id),
+    rs = (s.rv || {})[id] || { lines: {}, fields: {} };
+  const L = x.lines.map((l) => ({
+    status: 'pending',
+    edited: false,
+    ...l,
+    ...rs.lines[l.key],
+    orig: l,
+    label: undefined as string | undefined,
+  }));
+  const F = x.fields.map((l) => ({
+    status: 'pending',
+    edited: false,
+    ...l,
+    ...rs.fields[l.key],
+    orig: { ...l, unit: '', ref: '' },
+    measure: undefined as string | undefined,
+    unit: '',
+    ref: '',
+  }));
+  const all = [...L, ...F],
+    pending = all.filter((l) => l.status === 'pending').length;
+  const conf = L.filter((l) => l.status === 'confirmed').length,
+    exc = L.filter((l) => l.status === 'excluded').length,
+    edt = all.filter((l) => l.edited).length;
+  const linesLeft = L.filter((l) => l.status === 'pending').length;
+  const fieldsLeft = F.filter((l) => l.status === 'pending').length;
+  const dr = s.rvDraft;
+  const stText = (l: Item) =>
+    l.status === 'confirmed'
+      ? l.edited
+        ? 'Corrected and accepted.'
+        : 'Accepted.'
+      : l.status === 'excluded'
+        ? REJECTED_TEXT
+        : 'Proposed, not verified.';
+  const approvedTogether = new Map<string, LabObservation[]>();
+  for (const o of real?.observations ?? []) {
+    if (o.approved_group_id) approvedTogether.set(o.approved_group_id, [...(approvedTogether.get(o.approved_group_id) ?? []), o]);
+  }
+  const countAndDate = (rows: LabObservation[]) =>
+    `${plural(rows.length, 'result')}${rows[0].collected_on ? ` collected ${fLong(rows[0].collected_on)}` : ', collection date unknown'}`;
+  const editKey = s.rvEdit;
+  const { lines, order, select, keys } = resultLines(store, L, real?.observations, id);
 
   const fields = F.map((l, i) => {
     const k = l.key as MetadataFieldKey;
@@ -397,7 +471,6 @@ export function reviewVM(store: AppStore) {
   const detailsOpen = s.rvDetailsOpen ?? fieldsLeft > 0;
   const fieldsCorrected = F.filter((l) => l.edited).length;
   const pct = (n: number) => String(L.length ? Math.round((n / L.length) * 1000) / 10 : 0);
-  const byKey = (key: string | null) => lines.find((l) => l.key === key);
   const goNext = () => {
     const next = nextPending(order, store.state.rvLine) ?? (order.find((r) => r.pending)?.key ?? null);
     if (next) select(next, { rvOpen: null, rvEdit: null });
@@ -483,43 +556,7 @@ export function reviewVM(store: AppStore) {
     testNames: archive.testNames,
     rvLines: lines,
     rvSelected: s.rvLine,
-    /** One key, already known not to come from typing. Says which row it moved to, if any. */
-    rvKey: (key: string): string | null | undefined => {
-      const cur = byKey(store.state.rvLine) ?? lines[0];
-      if (!cur) return undefined;
-      const i = lines.indexOf(cur);
-      if (key === 'ArrowDown' || key === 'j') {
-        const next = lines[Math.min(lines.length - 1, i + 1)];
-        select(next.key, { rvOpen: null, rvEdit: null });
-        return next.key;
-      }
-      if (key === 'ArrowUp' || key === 'k') {
-        const prev = lines[Math.max(0, i - 1)];
-        select(prev.key, { rvOpen: null, rvEdit: null });
-        return prev.key;
-      }
-      if (key === 'a' || key === 'A') {
-        if (!cur.isPending) return undefined;
-        cur.primary.act();
-        return cur.primary.tone === 'accept' ? (nextPending(order, cur.key) ?? cur.key) : cur.key;
-      }
-      if (key === 'r' || key === 'R') {
-        if (!cur.isPending) return undefined;
-        cur.onReject();
-        return nextPending(order, cur.key) ?? cur.key;
-      }
-      if (key === 'u' || key === 'U') {
-        if (cur.isPending) return undefined;
-        cur.onUndo();
-        return cur.key;
-      }
-      if (key === 'c' || key === 'C') {
-        if (cur.isRejected) return undefined;
-        cur.onEdit();
-        return null; // Focus goes to the form, not a row.
-      }
-      return undefined;
-    },
+    rvKey: keys,
     rvApprovedGroups: [...approvedTogether.entries()].map(([groupId, rows]) => ({
       id: groupId,
       text: `${countAndDate(rows)} ${rows.length === 1 ? 'was' : 'were'} approved as a group on ${fShort(rows[0].revisions[rows[0].revisions.length - 1].occurred_at.slice(0, 10))}.`,
@@ -550,7 +587,7 @@ export function reviewVM(store: AppStore) {
       .map((l) => ({
         text: real
           ? l.measure
-            ? `${l.measure}: ${realLineEditedText(real, l.key)}`
+            ? `${l.measure}: ${realLineEditedText(real.observations, l.key)}`
             : `${l.label}: ${realEditedText(real, l.key as MetadataFieldKey)}`
           : (l.measure || l.label) +
             ': extracted as ' +

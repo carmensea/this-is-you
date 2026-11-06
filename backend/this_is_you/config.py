@@ -33,6 +33,11 @@ class Settings:
     require_sandbox: bool = False
     # Where the reader container listens. When set, documents go there and are never read in this process.
     reader_socket: str | None = None
+    # Epic on FHIR client IDs. Not secrets: the private signing key never leaves this computer.
+    epic_nonproduction_client_id: str | None = None
+    epic_production_client_id: str | None = None
+    # Must equal a redirect URI registered on the app. Defaults to the public address, or the development server.
+    connector_redirect_uri: str | None = None
 
     @property
     def production(self) -> bool:
@@ -145,5 +150,8 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
             web_dir=Path(env["THIS_IS_YOU_WEB_DIR"]) if env.get("THIS_IS_YOU_WEB_DIR") else None,
             require_sandbox=env.get("THIS_IS_YOU_REQUIRE_SANDBOX") == "1",
             reader_socket=env.get("THIS_IS_YOU_READER_SOCKET") or None,
+            epic_nonproduction_client_id=env.get("THIS_IS_YOU_EPIC_NONPRODUCTION_CLIENT_ID") or None,
+            epic_production_client_id=env.get("THIS_IS_YOU_EPIC_PRODUCTION_CLIENT_ID") or None,
+            connector_redirect_uri=env.get("THIS_IS_YOU_CONNECTOR_REDIRECT_URI") or None,
         )
     )

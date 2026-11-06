@@ -27,7 +27,7 @@ export function shellVM(store: AppStore) {
       border: k === v ? C.ink : 'transparent',
       color: k === v ? C.ink : C.ink2,
     })),
-    openSettings: () => store.setState({ notice: 'Sources and settings' }),
+    openSettings: () => store.go('sources'),
     hasNotice: !!s.notice,
     noticeText: (s.notice || '') + ' is planned for a later iteration.',
     closeNotice: () => store.go('overview'),

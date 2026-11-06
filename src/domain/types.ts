@@ -59,7 +59,7 @@ export interface ObservationRevision {
 export interface LabObservation {
   id: string;
   document_id: string | null;
-  origin: 'extracted' | 'manual';
+  origin: 'extracted' | 'manual' | 'fhir';
   extraction_status: string;
   verification_status: 'proposed' | 'verified' | 'rejected';
   confidence: 'high' | 'medium' | 'low' | null;
@@ -99,6 +99,17 @@ export interface LabObservation {
   group_eligible?: boolean;
   group_reasons?: string[];
   approved_group_id?: string | null;
+  /** For a result read from a provider: the stored version of the provider record it came from. */
+  source_resource?: {
+    provider: string | null;
+    resource_type: string;
+    fhir_id: string;
+    version_id: string | null;
+    last_updated: string | null;
+    fetched_at: string;
+    version_number: number;
+    versions_kept: number;
+  } | null;
 }
 
 export interface MethodChange {

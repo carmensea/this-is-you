@@ -20,6 +20,9 @@ CLIENT_HEADER = b"x-this-is-you-client"
 ALLOWED_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 PUBLIC = {("GET", "/api/status"), ("POST", "/api/auth/login")}
+# A provider's sign-in page sends the browser here, from another site and without the session cookie (SameSite=Strict).
+# It is proven by its single-use state instead, which only a signed-in start could have made, and it shows nothing.
+PROVIDER_RETURN = ("GET", "/api/connections/callback")
 
 _SECURITY_HEADERS = {
     b"content-security-policy": b"default-src 'none'; frame-ancestors 'none'",
@@ -62,7 +65,7 @@ def _refusal(scope: Scope, headers: dict[bytes, bytes], settings: Settings) -> s
     elif _hostname(host) not in ALLOWED_HOSTS:
         return "Unrecognized host."
     # Same-site is refused too: another app on this machine or a sibling name is still not this app.
-    if headers.get(b"sec-fetch-site") in (b"cross-site", b"same-site"):
+    if headers.get(b"sec-fetch-site") in (b"cross-site", b"same-site") and (scope["method"], scope["path"]) != PROVIDER_RETURN:
         return "Requests from other websites are not allowed."
     origin = headers.get(b"origin")
     if origin is not None:
@@ -121,7 +124,7 @@ class LocalOnlyMiddleware:
         reason = _refusal(scope, headers, settings)
         if reason is not None:
             await refuse(403, "forbidden", reason)
-        elif app_file or (scope["method"], scope["path"]) in PUBLIC or await run_in_threadpool(auth.session_is_valid, self.sessions, _session_token(headers, settings)):
+        elif app_file or (scope["method"], scope["path"]) in PUBLIC or (scope["method"], scope["path"]) == PROVIDER_RETURN or await run_in_threadpool(auth.session_is_valid, self.sessions, _session_token(headers, settings)):
             await self.app(scope, receive, send_with_headers)
         else:
             await refuse(401, "signed_out", "Sign in to reach your archive.")

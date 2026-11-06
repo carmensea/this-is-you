@@ -12,10 +12,12 @@ from sqlalchemy.orm import sessionmaker
 from . import auth
 from .api.auth import router as auth_router
 from .api.backups import router as backups_router
+from .api.connections import problem_response, router as connections_router
 from .api.documents import router as documents_router
 from .api.imports import router as imports_router
 from .api.observations import router as observations_router
 from .backup import BackupJobs, clear_leftovers
+from .connectors import service as connectors
 from .config import Settings, load_settings, validate
 from .db import make_engine, migrate
 from .extraction import sandbox
@@ -71,12 +73,16 @@ def create_app(settings: Settings) -> FastAPI:
     for document_id in documents_to_resume(app.state.sessions):
         app.state.extraction.enqueue(document_id)
     app.state.backups = BackupJobs(settings)
+    connectors.mark_interrupted(app.state.sessions)
+    app.state.connectors = connectors.Connectors(settings, app.state.sessions, store, app.state.extraction.enqueue)
     app.add_middleware(LocalOnlyMiddleware, sessions=app.state.sessions, settings=settings)
     app.include_router(auth_router)
     app.include_router(documents_router)
     app.include_router(observations_router)
     app.include_router(imports_router)
     app.include_router(backups_router)
+    app.include_router(connections_router)
+    app.add_exception_handler(connectors.ConnectorProblem, lambda _request, exc: problem_response(exc))
 
     @app.exception_handler(UploadRejected)
     async def rejected(_request: Request, exc: UploadRejected) -> JSONResponse:

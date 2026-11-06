@@ -12,7 +12,7 @@ import { BatchImporter, emptyReport, type ReportState } from './batchImport';
 const READING_POLL_MS = 800;
 const BACKUP_POLL_MS = 1000;
 
-export type View = 'overview' | 'biomarkers' | 'history' | 'documents' | 'compare' | 'import';
+export type View = 'overview' | 'biomarkers' | 'history' | 'documents' | 'compare' | 'import' | 'sources';
 export const VIEWS: View[] = ['overview', 'biomarkers', 'history', 'documents', 'compare', 'import'];
 export const VIEW_LABELS: Record<View, string> = {
   overview: 'Overview',
@@ -21,7 +21,10 @@ export const VIEW_LABELS: Record<View, string> = {
   documents: 'Documents',
   compare: 'Compare',
   import: 'Import',
+  sources: 'Connected sources',
 };
+/** Reached from Settings, not the main navigation. */
+export const ROUTED_VIEWS: View[] = [...VIEWS, 'sources'];
 
 type ReviewLine = {
   key: string;

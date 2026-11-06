@@ -8,6 +8,7 @@ import { ImportScreen } from './screens/ImportScreen';
 import { OverviewScreen } from './screens/OverviewScreen';
 import { ReviewScreen } from './screens/ReviewScreen';
 import { SignIn } from './screens/SignIn';
+import { SourcesScreen } from './screens/SourcesScreen';
 import { useStore } from './state/useStore';
 import { type View } from './state/store';
 import { viewFromHash } from './services/archiveMode';
@@ -49,7 +50,7 @@ export function App() {
       {isDemo && <DemoBanner />}
       {notice && <Notice v={v} />}
       {archiveStale && <StaleNotice onRetry={store.retryRefresh} />}
-      {view !== 'overview' && !blocked && <SnapshotBar v={v} />}
+      {view !== 'overview' && view !== 'sources' && !blocked && <SnapshotBar v={v} />}
       {blocked && <NoRecordsYet />}
       {!blocked && view === 'overview' && <OverviewScreen />}
       {!blocked && view === 'biomarkers' && <BiomarkersScreen />}
@@ -57,6 +58,7 @@ export function App() {
       {view === 'documents' && <DocumentsScreen />}
       {view === 'import' && (rvDoc ? <ReviewScreen /> : <ImportScreen />)}
       {!blocked && view === 'compare' && <CompareScreen />}
+      {view === 'sources' && <SourcesScreen />}
     </div>
   );
 }

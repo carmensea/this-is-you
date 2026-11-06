@@ -67,6 +67,7 @@ class DecisionAction(str, enum.Enum):
 class ObservationOrigin(str, enum.Enum):
     EXTRACTED = "extracted"
     MANUAL = "manual"
+    FHIR = "fhir"  # Read from a connected provider. Proposed like any other result.
 
 
 class ObservationVerification(str, enum.Enum):
@@ -92,6 +93,7 @@ class RevisionAction(str, enum.Enum):
     VERIFIED = "verified"
     REJECTED = "rejected"
     REOPENED = "reopened"
+    IMPORTED = "imported"  # Read from a connected provider, as proposed.
     PARSER_FIX = "parser_fix"  # A corrected confidence. Never a person's decision.
 
 
@@ -261,6 +263,8 @@ class Observation(Base):
     issues: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     # The group approval that accepted it, while that still stands. The history keeps it after that.
     approved_group_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    # The exact provider record version this was read from. Never changed once set.
+    fhir_resource_id: Mapped[int | None] = mapped_column(ForeignKey("fhir_resources.id"), index=True)
 
     document: Mapped[Document | None] = relationship()
     revisions: Mapped[list["ObservationRevision"]] = relationship(back_populates="observation", order_by="ObservationRevision.id")
@@ -361,3 +365,67 @@ class AuthSession(Base):
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     created_at: Mapped[int] = mapped_column(Integer, nullable=False)
     last_seen_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class ProviderConnection(Base):
+    """One provider this archive may read from. Read-only: nothing is ever written back."""
+
+    __tablename__ = "provider_connections"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid4().hex)
+    provider_key: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)  # connected, needs_sign_in, identity_hold, disconnected
+    fhir_base: Mapped[str] = mapped_column(String(255), nullable=False)  # The address it was authorized for.
+    patient_fhir_id: Mapped[str | None] = mapped_column(String(128))
+    patient_name: Mapped[str | None] = mapped_column(String(200))
+    patient_birth_date: Mapped[str | None] = mapped_column(String(10))
+    identity_status: Mapped[str | None] = mapped_column(String(32))
+    identity_reason: Mapped[str | None] = mapped_column(String(400))
+    # Imports wait until this equals patient_fhir_id: the person said this provider's patient is them.
+    confirmed_patient_fhir_id: Mapped[str | None] = mapped_column(String(128))
+    scope: Mapped[str | None] = mapped_column(String(2000))
+    # Tokens, encrypted with a key kept outside the database and outside backups.
+    token_ciphertext: Mapped[str | None] = mapped_column(String(8000))
+    # Moves on with every token write, sign-in and disconnect. A write expecting an older one is refused.
+    token_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    connected_at: Mapped[str | None] = mapped_column(String(32))
+    disconnected_at: Mapped[str | None] = mapped_column(String(32))
+    updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    runs: Mapped[list["SyncRun"]] = relationship(back_populates="connection", order_by="SyncRun.id")
+
+
+class SyncRun(Base):
+    """One manual synchronization. Counts and safe messages only, never record contents."""
+
+    __tablename__ = "sync_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("provider_connections.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)  # running, completed, partial, failed, interrupted
+    started_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    finished_at: Mapped[str | None] = mapped_column(String(32))
+    counts: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    problems: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+    connection: Mapped[ProviderConnection] = relationship(back_populates="runs")
+
+
+class FhirResource(Base):
+    """One version of one provider record, exactly as received. A changed record adds a row; none is ever replaced."""
+
+    __tablename__ = "fhir_resources"
+    __table_args__ = (UniqueConstraint("connection_id", "resource_type", "fhir_id", "content_sha256"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("provider_connections.id"), nullable=False, index=True)
+    sync_run_id: Mapped[int] = mapped_column(ForeignKey("sync_runs.id"), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    fhir_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    version_id: Mapped[str | None] = mapped_column(String(64))
+    last_updated: Mapped[str | None] = mapped_column(String(40))  # The provider's own change time.
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    body: Mapped[dict] = mapped_column(JSON, nullable=False)
+    fetched_at: Mapped[str] = mapped_column(String(32), nullable=False)  # When this archive received it. Not a clinical date.
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id"))  # A PDF attachment stored as a document.
+

@@ -214,7 +214,7 @@ export const whenSignedOut = (handler: () => void) => {
   onSignedOut = handler;
 };
 
-async function getJson<T>(url: string, delays = READ_RETRY_DELAYS_MS): Promise<T> {
+export async function getJson<T>(url: string, delays = READ_RETRY_DELAYS_MS): Promise<T> {
   let failure = new ArchiveReadError('unreachable');
   for (let attempt = 0; ; attempt++) {
     try {
@@ -240,7 +240,7 @@ export const listObservations = async () =>
 export const listDocuments = async () =>
   (await getJson<{ documents: DocumentDto[] }>('/api/documents')).documents.map(toArchiveDocument);
 
-async function post<T>(url: string, body?: unknown, method = 'POST'): Promise<T> {
+export async function post<T>(url: string, body?: unknown, method = 'POST'): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {

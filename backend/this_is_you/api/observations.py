@@ -43,7 +43,7 @@ class ApproveGroupBody(BaseModel):
 def _one(request: Request, observation_id: str) -> ObservationOut:
     sessions = request.app.state.sessions
     all_rows = service.list_observations(sessions)
-    return ObservationOut.of(service.get_observation(sessions, observation_id), service.possible_duplicates(all_rows), service.review_groups(all_rows))
+    return ObservationOut.of(service.get_observation(sessions, observation_id), service.possible_duplicates(all_rows), service.review_groups(all_rows), service.provider_sources(sessions, all_rows))
 
 
 @router.get("/lab-tests", response_model=list[LabTestOut])
@@ -56,7 +56,8 @@ def list_all(request: Request) -> ObservationList:
     all_rows = service.list_observations(request.app.state.sessions)
     duplicates = service.possible_duplicates(all_rows)
     groups = service.review_groups(all_rows)
-    return ObservationList(observations=[ObservationOut.of(o, duplicates, groups) for o in all_rows])
+    sources = service.provider_sources(request.app.state.sessions, all_rows)
+    return ObservationList(observations=[ObservationOut.of(o, duplicates, groups, sources) for o in all_rows])
 
 
 @router.post("/observations", response_model=ObservationOut, status_code=201)

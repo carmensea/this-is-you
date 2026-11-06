@@ -134,9 +134,11 @@ class ObservationOut(BaseModel):
     group_eligible: bool = False
     group_reasons: list[str] = []
     approved_group_id: str | None = None
+    # For a result read from a provider: which stored version of which provider record it came from.
+    source_resource: dict | None = None
 
     @classmethod
-    def of(cls, o: Observation, duplicates: dict[str, list[str]] | None = None, groups: dict | None = None) -> "ObservationOut":
+    def of(cls, o: Observation, duplicates: dict[str, list[str]] | None = None, groups: dict | None = None, sources: dict | None = None) -> "ObservationOut":
         test = BY_CODE.get(o.test_code or "")
         group = (groups or {}).get(o.id)
         return cls(
@@ -153,7 +155,7 @@ class ObservationOut(BaseModel):
             version=max((r.id for r in o.revisions), default=0),
             review_group=group.key if group else None, review_group_label=group.label if group else None,
             group_eligible=group.eligible if group else False, group_reasons=list(group.reasons) if group else [],
-            approved_group_id=o.approved_group_id,
+            approved_group_id=o.approved_group_id, source_resource=(sources or {}).get(o.id),
         )
 
 

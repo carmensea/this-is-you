@@ -94,8 +94,9 @@ export function buildClinicalRecords(
       });
       continue;
     }
-    // The same result from two documents is one point on a chart. Both sources stay in the archive.
-    const same = [markerKey(o), o.collected_on, o.value_text, o.display_unit].join('|');
+    // The same result from two sources is one point on a chart, compared as a number so 14.2 and 14.20 match, as the
+    // service's possible-duplicate check does. Both sources stay in the archive.
+    const same = [markerKey(o), o.collected_on, o.value_number, o.display_unit].join('|');
     if (seen.has(same)) continue;
     seen.add(same);
     chartable.push(o);

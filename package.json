@@ -23,6 +23,7 @@
     "readiness:delete": "node tools/readiness/delete-document.mjs",
     "readiness:viewer": "node tools/readiness/original-viewer.mjs",
     "readiness:worker": "node tools/readiness/pdf-worker.mjs",
+    "readiness:epic": "node tools/readiness/epic-sandbox.mjs",
     "deploy:https-flow": "node tools/deploy/https-flow.mjs"
   },
   "dependencies": {

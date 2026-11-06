@@ -24,7 +24,7 @@ from this_is_you.extraction import sandbox
 from this_is_you.extraction.runner import Limits, extract, worker_command
 from this_is_you.main import create_app
 from this_is_you.models import AuthSession
-from this_is_you.security import PUBLIC
+from this_is_you.security import PUBLIC, PROVIDER_RETURN
 
 from . import pdfs
 from .conftest import CLIENT_HEADERS, client_for, make_pdf, upload
@@ -59,9 +59,14 @@ def test_every_route_but_the_listed_ones_needs_a_session(anon):
     routes = _every_route(anon.app)
     assert len(routes) > 25, "the route list should not have come back nearly empty"
     assert {("GET", "/api/documents/" + "0" * 32 + "/content"), ("GET", "/api/identity"), ("POST", "/api/backups"), ("GET", "/api/backups")} <= set(routes)
+    assert PROVIDER_RETURN in routes
     for method, path in routes:
-        if (method, path) not in PUBLIC:
-            answer = anon.request(method, path, headers=CLIENT_HEADERS)
+        if (method, path) == PROVIDER_RETURN:
+            # Open, but proven by a single-use state: without one it reveals nothing and only redirects with a fixed word.
+            answer = anon.request(method, path, headers={"sec-fetch-site": "cross-site"}, follow_redirects=False)
+            assert answer.status_code == 200 and "/#/sources?result=expired" in answer.text and "set-cookie" not in answer.headers
+        elif (method, path) not in PUBLIC:
+            answer = anon.request(method, path, headers=CLIENT_HEADERS, follow_redirects=False)
             assert answer.status_code == 401, (method, path, answer.status_code)
             assert answer.json()["code"] == "signed_out" and answer.headers["x-content-type-options"] == "nosniff"
 
@@ -79,6 +84,7 @@ def test_no_route_hides_from_the_list_above(anon):
 
 def test_only_two_requests_are_open(anon):
     assert PUBLIC == {("GET", "/api/status"), ("POST", "/api/auth/login")}
+    assert PROVIDER_RETURN == ("GET", "/api/connections/callback")  # The one more, which needs a provider's state instead.
     assert set(anon.get("/api/status").json()) == {"status", "max_upload_bytes", "passphrase_set"}
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import logging
+import json
 import os
 import sys
 from pathlib import Path
@@ -181,6 +182,18 @@ def _doctor(settings) -> None:
         print(f"{name}: {value}")
 
 
+def _connector_key(settings) -> None:
+    from .connectors.keys import ConnectorKeys
+
+    settings.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    keys = ConnectorKeys(settings.data_dir)
+    # Only the key set goes to standard output, so `connector-key > jwks.json` makes the file to upload.
+    print("Public half only, as the JSON Web Key Set Epic on FHIR asks of patient-facing confidential clients. "
+          "The private key stays in this archive's folder and is never printed or backed up.", file=sys.stderr)
+    print(f"Key ID: {keys.key_id()}", file=sys.stderr)
+    print(json.dumps(keys.public_jwks(), indent=2))
+
+
 def main() -> None:
     os.umask(0o077)  # Everything this process creates is private to this user.
     parser = argparse.ArgumentParser(prog="this_is_you")
@@ -188,6 +201,7 @@ def main() -> None:
     commands.add_parser("set-passphrase", help="Set or replace the sign-in passphrase. Signs out every device.")
     commands.add_parser("sign-out-everywhere", help="End every signed-in session, as after losing a device.")
     commands.add_parser("doctor", help="Show where this archive stands on security and backups. Changes nothing.")
+    commands.add_parser("connector-key", help="Print the public key to register with Epic on FHIR. Makes the key pair on first use.")
     backup = commands.add_parser("backup", help="Write a backup. Safe while the service runs.")
     backup.add_argument("--to", type=Path, help="Folder to write into. Defaults to the backups folder. Its parent has to exist already.")
     backup.add_argument("--plain", action="store_true", help="Write an UNENCRYPTED folder. Anyone who can read it can read every record.")
@@ -228,6 +242,8 @@ def main() -> None:
             print("Every device was signed out.")
         elif args.command == "doctor":
             _doctor(settings)
+        elif args.command == "connector-key":
+            _connector_key(settings)
         elif args.command == "backup":
             _backup(settings, args)
         elif args.command == "backup-key":

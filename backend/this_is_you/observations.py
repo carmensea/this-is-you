@@ -17,10 +17,12 @@ from .lab_catalog import BY_CODE, CATEGORIES, CODE_SYSTEM, canonical_unit, find_
 from .models import (
     Confidence,
     Document,
+    FhirResource,
     Observation,
     ObservationExtraction,
     ObservationOrigin,
     ObservationRevision,
+    ProviderConnection,
     ObservationVerification,
     ReviewGroupApproval,
     RevisionAction,
@@ -158,6 +160,32 @@ def get_observation(sessions: sessionmaker[Session], observation_id: str) -> Obs
     return found
 
 
+def provider_sources(sessions: sessionmaker[Session], observations: list[Observation]) -> dict[str, dict]:
+    """Which stored version of which provider record each provider result was read from, and how many versions are kept."""
+    wanted = {o.id: o.fhir_resource_id for o in observations if o.fhir_resource_id is not None}
+    if not wanted:
+        return {}
+    with sessions() as session:
+        resources = {r.id: r for r in session.scalars(select(FhirResource).where(FhirResource.id.in_(set(wanted.values()))))}
+        providers = dict(session.execute(select(ProviderConnection.id, ProviderConnection.provider_key)
+                                         .where(ProviderConnection.id.in_({r.connection_id for r in resources.values()}))).all())
+        versions: dict[tuple, list[int]] = {}
+        for row in session.execute(select(FhirResource.connection_id, FhirResource.resource_type, FhirResource.fhir_id, FhirResource.id)
+                                   .where(FhirResource.fhir_id.in_({r.fhir_id for r in resources.values()})).order_by(FhirResource.id)):
+            versions.setdefault(tuple(row[:3]), []).append(row[3])
+    out = {}
+    for observation_id, resource_id in wanted.items():
+        r = resources.get(resource_id)
+        if r is None:
+            continue
+        kept = versions.get((r.connection_id, r.resource_type, r.fhir_id), [r.id])
+        out[observation_id] = {
+            "provider": providers.get(r.connection_id), "resource_type": r.resource_type, "fhir_id": r.fhir_id, "version_id": r.version_id,
+            "last_updated": r.last_updated, "fetched_at": r.fetched_at, "version_number": kept.index(r.id) + 1, "versions_kept": len(kept),
+        }
+    return out
+
+
 def possible_duplicates(observations: list[Observation]) -> dict[str, list[str]]:
     """Results that say the same thing: same test, same date, same value, same unit. Not merged."""
     groups: dict[tuple, list[str]] = {}
@@ -165,7 +193,9 @@ def possible_duplicates(observations: list[Observation]) -> dict[str, list[str]]
         if o.verification_status is ObservationVerification.REJECTED or not o.collected_on:
             continue
         name = o.test_code or " ".join(o.reported_name.lower().split())
-        groups.setdefault((name, o.collected_on, o.value_text, canonical_unit(o.unit)), []).append(o.id)
+        # By number where there is one, so 14.2 from a provider and 14.20 from a PDF are the same result.
+        value = o.value_number if o.value_number is not None else o.value_text
+        groups.setdefault((name, o.collected_on, value, canonical_unit(o.unit)), []).append(o.id)
     return {i: [other for other in group if other != i] for group in groups.values() if len(group) > 1 for i in group}
 
 

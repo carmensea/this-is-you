@@ -47,7 +47,8 @@ Open **http://127.0.0.1:5180**. Use that address rather than `localhost`, so ano
 | `npm run readiness:recovery` | An import killed between saving a file and recording it, in Chrome, on a fictional archive: restarts, resuming, and the report against Documents |
 | `npm run readiness:delete` | Deleting a document in Chrome on a fictional archive: asking first, what goes, what stays, and a restart |
 | `npm run readiness:worker` | The shared PDF worker in Chrome on fictional PDFs: rapid switching, cancelling, failed files, killed workers, slow files, Stop and worker lifetime. About 7 minutes. Needs a prior build. |
-| `npm run readiness:review` | Group review in Chrome on a fictional archive: corrections, stale groups, approval, undo and real restarts |
+| `npm run readiness:epic` | The provider connector against Epic's real sandbox in Chrome, with Epic's published fictional patient. Needs `EPIC_SANDBOX_CLIENT_ID` and a registered key. Reaches fhir.epic.com. |
+| `npm run readiness:review` | Reviewing a fictional report in Chrome: one-click and keyboard decisions, corrections, an unreadable value, undo, the original's zoom and marked line, phone width, and decisions kept after reloads and a restart |
 | `npm run readiness:dev` | Sign in, import and sign out through the real dev server, on a fictional archive. About 1 minute. |
 | `npm run readiness -- [--scale 1]` | The whole import, crash, backup and restore workflow in Chrome, on a messy fictional folder. About 4 minutes at scale 1. Needs a prior build. |
 
@@ -165,7 +166,7 @@ Each document has three separate statuses:
 
 ## Laboratory results
 
-**What is recognized.** Rows from text-based PDFs for complete blood counts, metabolic panels, lipid panels and thyroid tests, in common layouts: test name, value, unit, reference range and flag, in any of the usual column orders. Rules are fixed and local. Other tests are proposed only when a row has a name, value, unit and range together, and they are marked for a closer look. Anything else is left alone, and the document stays reviewable with results added by hand.
+**What is recognized.** Rows from text-based PDFs for complete blood counts, metabolic panels, lipid panels, thyroid tests and urinalysis, in common layouts: test name, value, unit, reference range and flag, in any of the usual column orders. Rules are fixed and local. Other tests are proposed only when a row has a name, value, unit and range together, and they are marked for a closer look. Anything else is left alone, and the document stays reviewable with results added by hand.
 
 **Result tables.** Differentials and blood count unit spellings such as `10*3/uL` and `K/mcL` are included. Tables headed "Your Value", "Standard Range" or "Component Results" are read whether each row is on one line, each cell is on its own line, or a label sits beside each value, and they can continue across pages. Only cells that follow one another under one test name are joined, so a page where all names come before all values is not paired up by counting. A row that could only be partly read is still listed, with what is uncertain, and one with no value cannot be approved until you enter it. These layouts were built from fictional examples of the general format, so a real report may still differ.
 
@@ -204,6 +205,42 @@ Numeric dates are read month first (03/11/2024 is 11 March), and this alone is n
 
 Urinalysis color and clarity (Yellow, Amber, Clear, Slightly Cloudy, Turbid and similar) are read as printed, and only for a test named for color, clarity or appearance, so a word like Red is never taken as another test's result. Urine microscopy is read too: counts per field such as `0-2 /HPF`, printed as a range, and graded words such as Few, Rare or Moderate, which are kept as printed. A test name whose value could not be read is proposed with no value and the printed text quoted, so it is never silently dropped.
 
+## Connected sources
+
+**Settings** opens Connected sources: read-only SMART on FHIR connections to Epic organizations. It is in development. The code lists only Epic's sandbox, with its fictional patients. A real health system is added in a file beside your own archive, never in this repository (see below), and is shown as planned until a production registration is approved.
+
+- **You sign in on the provider's own page.** This app never asks for, sees or stores a MyChart password.
+- **Nothing is imported until you confirm the patient record is yours**, and again if a later sign-in or synchronization shows a different patient or changed details.
+- **Synchronizing is manual.** Results arrive in **Results to review** as proposals, decided one at a time exactly like a report's measurements: Accept, Check, Correct, Reject and Undo, with the same keys and the same history. Each shows which stored version of which provider record it came from. None is used in charts until you verify it, and a verified result is never changed by a synchronization. Every record version is kept exactly as received. A result that changes at the provider arrives as a new proposal. A result matching one already in the archive is marked a possible duplicate, and both are kept.
+- **Dates stay separate.** A result's collection date and report date come from the provider. The time it reached this archive is never used as a clinical date.
+- **PDF attachments** of clinical notes go through the normal document pipeline. Other note formats are kept as provider records only.
+- **Disconnect** removes the saved permission at once and revokes it where the provider allows. It takes effect even during a synchronization: one under way stops, saves no new token, and imports nothing more. Imported records stay until you choose **Delete imported records**. PDFs it stored stay in Documents.
+- **Rolling refresh tokens:** when the provider sends a new refresh token, it replaces the stored one in a single encrypted write, and the next renewal uses it. If that write fails, the stored tokens stay as they were; if the provider had already retired them, you sign in again.
+- **Requests go only to the listed providers** (the sandbox in `backend/this_is_you/connectors/providers.py`, and any in your own provider file), over HTTPS, only to a name that leads to the public internet, never following redirects, and a token only ever goes to the provider's own FHIR address. Page links and attachment addresses are checked the same way. Nothing runs in the background.
+- **Credentials:** tokens are encrypted in the database. The token key and the private signing key are separate files in the archive's folder, readable only by the service's user, and never backed up. After restoring onto another machine, connect again.
+
+### Setting up the Epic sandbox
+
+1. Create an account at [fhir.epic.com](https://fhir.epic.com/) and an app with audience **Patients**, FHIR version **R4**, the confidential-client option, refresh tokens, and these APIs: Patient.Read, Observation.Search and Read (Labs), DiagnosticReport.Search and Read (Results), DocumentReference.Search and Read (Clinical Notes), Binary.Read (Clinical Notes).
+2. Redirect URI: `http://127.0.0.1:8137/api/connections/callback`, for `npm run readiness:epic`. Epic advises keeping localhost addresses on a sandbox-only app that is never made ready for production.
+3. Make the key pair and save its public half: `THIS_IS_YOU_DATA_DIR=~/.this-is-you-epic-sandbox-keys backend/.venv/bin/python -m this_is_you connector-key > epic-sandbox-jwks.json`. Epic asks patient-facing confidential clients for a JSON Web Key Set, which is what this writes: RSA 3072, RS384. Upload it as the app's sandbox (non-production) public key. The private key never leaves that folder.
+4. Mark the app ready for the sandbox and wait up to an hour. Then run `npm run build && EPIC_SANDBOX_CLIENT_ID=<non-production client ID> npm run readiness:epic`.
+
+The sandbox connects only from an archive whose folder holds a `SANDBOX-ONLY-FICTIONAL-RECORDS` file, and such an archive connects to nothing else, so fictional records cannot reach a real archive. `npm run readiness:epic` makes a temporary one each run. Without `EPIC_SANDBOX_CLIENT_ID` it runs only its preflight checks and never opens Epic's sign-in.
+
+### Adding your own provider
+
+Your health system is personal, so it stays out of the code. Put it in `connector-providers.json` in your archive's folder, which is outside this repository and readable only by you:
+
+```json
+{"providers": [{"key": "fictional-health", "name": "Fictional Health System", "place": "Example City",
+                "fhir_base": "https://fhir.example.com/interconnect/api/FHIR/R4", "organization_id": "4242", "state": "planned"}]}
+```
+
+Then `chmod 600 connector-providers.json` and restart the service. Use the base address from Epic's published endpoint list, and check it against the organization's own discovery document. The file is read once at start, and is left out whole, with the reason shown in Connected sources, if it is a link, belongs to another account, can be read or changed by other accounts, has unknown fields, or names an address that is not an https FHIR R4 base on a public host name. Messages never repeat what the file holds. A provider stays `planned` until you change it to `available`, which needs `THIS_IS_YOU_EPIC_PRODUCTION_CLIENT_ID` from an approved production registration.
+
+For your own installation later, the service reads `THIS_IS_YOU_EPIC_NONPRODUCTION_CLIENT_ID`, `THIS_IS_YOU_EPIC_PRODUCTION_CLIENT_ID` and `THIS_IS_YOU_CONNECTOR_REDIRECT_URI` (default: the public address, or `http://127.0.0.1:5180/api/connections/callback` in development). Whether Epic accepts a Tailscale `.ts.net` redirect address for production is not yet verified.
+
 ## Deleting a document
 
 **Delete document** on the Documents screen asks first, by name, then removes the file and everything known from it: readings, results, decisions, review approvals and its rows in the import report. Other documents are not touched. It is permanent, and a crash partway either finishes it at the next start or leaves everything in place. It does not reach backups already made, which still hold the file until they are removed, and a deleted file's folder will import it again if chosen again.
@@ -239,8 +276,8 @@ Urinalysis color and clarity (Yellow, Amber, Clear, Slightly Cloudy, Turbid and 
 | `POST /api/observations` | Enter a result by hand |
 | `POST /api/observations/{id}/correct` | Correct a result. Takes it off the charts until accepted again. |
 | `POST /api/observations/{id}/verify`, `/reject`, `/reopen` | Accept, reject or reopen one result |
-| `POST /api/observations/approve-group` | Approve one exact set of rows at the versions shown. All of them, or none. |
-| `POST /api/observations/group-approvals/{id}/undo` | Return a group to review. The history is kept. |
+| `POST /api/observations/approve-group` | Approve one exact set of rows at the versions shown. All of them, or none. Kept for compatibility: the review screen decides one result at a time. |
+| `POST /api/observations/group-approvals/{id}/undo` | Return a group approved by an earlier version to review. The history is kept. |
 | `GET /api/lab-tests` | The known tests |
 | `POST /api/import-batches`, `GET /api/import-batches` | Start a batch, or list saved reports with their counts |
 | `POST /api/import-batches/{id}/items` | List up to 500 files. Listing one twice returns the same row. |

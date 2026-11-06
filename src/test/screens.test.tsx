@@ -67,10 +67,13 @@ describe('interactions', () => {
     fireEvent.keyDown(screen.getByRole('slider'), { key:'End' });
     expect(store.state.cur).toBe(syntheticArchive.today);
   });
-  it('shows a planned-feature notice for Settings, as the prototype does', () => {
-    mount();
+  it('opens Connected sources from Settings, and the demo archive has none', () => {
+    const { store, container } = mount();
     fireEvent.click(screen.getByRole('button', { name:'Settings' }));
-    expect(screen.getByText('Sources and settings is planned for a later iteration.')).toBeTruthy();
+    expect(store.state.view).toBe('sources');
+    expect(screen.getByRole('heading', { name:'Connected sources' })).toBeTruthy();
+    expect(container.textContent).toContain('The demo archive is fictional and has none.');
+    expect(container.textContent).not.toContain('—');
   });
   it('states that import is simulated', () => {
     const { container } = mount({ view:'import' });

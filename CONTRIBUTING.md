@@ -28,6 +28,10 @@ git config core.hooksPath .githooks
 - `git commit --no-verify` skips them. They stop accidents, not someone determined, so please do not skip them.
 - The service itself refuses to keep an archive or backups inside a Git repository.
 
+## Checks on every pull request
+
+`.github/workflows/checks.yml` runs the same record guard over every file in every commit, gitleaks over the whole history including merges, and the tests and type check. It runs with read-only access and no secrets, also for pull requests from forks. A pull request that fails it is not merged.
+
 ## Tests
 
 `npm test`, `npm run test:backend` and `npm run typecheck` must pass. A change to how records are read, stored or reviewed needs a test that uses fictional data.

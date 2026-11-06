@@ -31,7 +31,7 @@ The intended setup is an always-on Linux mini PC, reached privately from a phone
 
 `security.py` runs before any route, and refuses by default.
 
-- **Session required.** Only `GET /api/status` and `POST /api/auth/login` are open. A route added later is protected automatically. `test_every_route_but_the_listed_ones_needs_a_session` walks the framework's route list, so a new route cannot be missed.
+- **Session required.** Only `GET /api/status` and `POST /api/auth/login` are open, plus `GET /api/connections/callback`, where a provider's sign-in page returns the browser from its own site, so neither the session cookie nor a same-site request is possible. It is accepted only with a single-use state made by a signed-in Connect within the last 10 minutes, and it answers only with a small page that moves on to the app with a fixed word. A redirect would not do: the browser would still count the app's page as a visit from the provider's site, and the cross-site check above would refuse it, as the live sandbox test showed. A route added later is protected automatically. `test_every_route_but_the_listed_ones_needs_a_session` walks the framework's route list, so a new route cannot be missed.
 - **Passphrase is set only from the command line.** No web route can create or replace it. Anything that reaches the service cannot claim an archive that has no passphrase. An archive with none stays closed.
 - **Host check**, which stops DNS rebinding.
 - **Origin must match Host**, and browsers reporting `cross-site` or `same-site` are refused, even with a valid session.
@@ -103,6 +103,8 @@ Assumes the parser can be subverted by a crafted file.
 11. **Encrypted backups need room** for a full plain copy in the archive's folder while they are built. A crash leaves that copy there until the next start, in a private folder.
 12. **Losing a backup passphrase loses that backup.** There is no recovery by design.
 13. **Typing the backup passphrase on the machine** for **Test restore** or `verify` sends it there, in memory, for that one check. On a compromised machine that hands it over, along with every backup. Test on a clean machine if you have any doubt.
+
+14. **Provider connections reach the internet.** Only when you press Connect or Synchronize, only to the providers in `providers.py`, over HTTPS, without following redirects. A token is only ever sent under the provider's FHIR address. A provider could still send false records: they arrive as proposals for review, like any reading. Tokens are encrypted in the database with a key outside it and outside backups. Anyone who can read the service user's files can read both, so the folder's permissions are what protect them.
 
 ## 5. What this cannot stop
 
