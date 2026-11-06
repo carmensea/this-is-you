@@ -13,10 +13,30 @@ import socket
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import date
 
 EXIT_MEMORY = 71
 MIN_TEXT_CHARS = 20  # Fewer than this on a page counts as no text: scans often carry a stray mark or two.
+
+
+def resident_bytes() -> Callable[[], int]:
+    """How much memory this reader holds, for the watchdog.
+
+    Linux keeps a process's peak memory across exec, so a reader started by a service that once used a lot reads as
+    already over its limit before it has done anything. On Linux the watchdog reads what is resident now instead, from a
+    file opened here, before the file limits apply. Without /proc (inside bubblewrap) only a peak this reader set itself
+    counts; the address-space limit, which Linux enforces, still bounds it. macOS starts every process's peak afresh.
+    """
+    peak = lambda: resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # noqa: E731  Bytes on macOS, kilobytes on Linux.
+    if sys.platform != "linux":
+        return peak
+    try:
+        statm, page = os.open("/proc/self/statm", os.O_RDONLY), os.sysconf("SC_PAGE_SIZE")
+        return lambda: int(os.pread(statm, 128, 0).split()[1]) * page
+    except (OSError, ValueError):
+        inherited = peak() * 1024
+        return lambda: now if (now := peak() * 1024) > inherited else 0
 
 
 def apply_limits(limits: dict) -> None:
@@ -30,12 +50,11 @@ def apply_limits(limits: dict) -> None:
     except (ValueError, OSError):
         pass  # macOS does not support this limit, so the watchdog below covers it.
 
-    # ru_maxrss is bytes on macOS and kilobytes on Linux.
-    unit = 1 if sys.platform == "darwin" else 1024
+    resident = resident_bytes()
 
     def watchdog() -> None:
         while True:
-            if resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * unit > memory:
+            if resident() > memory:
                 os._exit(EXIT_MEMORY)
             time.sleep(0.05)
 

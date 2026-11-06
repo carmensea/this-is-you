@@ -12,26 +12,27 @@ __pycache__
 .pytest_cache
 *.egg-info
 
-# Local configuration and anything that could hold personal health data.
+# Local configuration and anything that could hold personal health data. Extensions match in any case, as a
+# case-sensitive disk (Linux) tells REPORT.PDF from report.pdf.
 # The archive itself lives outside this repository; these are a second line of defense.
 .env
 .env.*
-*.sqlite
-*.sqlite3
-*.db
-*.db-wal
-*.db-shm
+*.[sS][qQ][lL][iI][tT][eE]
+*.[sS][qQ][lL][iI][tT][eE]3
+*.[dD][bB]
+*.[dD][bB]-[wW][aA][lL]
+*.[dD][bB]-[sS][hH][mM]
 /data
 /archive
-*.sqlite-*
-*.sqlite3-*
-*.sqlite.*
-*.sqlite3.*
+*.[sS][qQ][lL][iI][tT][eE]-*
+*.[sS][qQ][lL][iI][tT][eE]3-*
+*.[sS][qQ][lL][iI][tT][eE].*
+*.[sS][qQ][lL][iI][tT][eE]3.*
 # Backups, encrypted or not, and anything else the archive folder holds.
-*.tiyb
-*.tiyb.*
+*.[tT][iI][yY][bB]
+*.[tT][iI][yY][bB].*
 this-is-you-backup-*
-*.replaced-*
+*.[rR][eE][pP][lL][aA][cC][eE][dD]-*
 backup-key.json
 service.lock
 originals/
@@ -39,29 +40,29 @@ incoming/
 set-aside/
 backup-staging/
 # Documents. Test fixtures are built while tests run, so none is ever tracked.
-*.pdf
-*.heic
-*.tif
-*.tiff
-*.dcm
-*.hl7
-*.ccd
-*.ccda
-*.docx
-*.xlsx
+*.[pP][dD][fF]
+*.[hH][eE][iI][cC]
+*.[tT][iI][fF]
+*.[tT][iI][fF][fF]
+*.[dD][cC][mM]
+*.[hH][lL]7
+*.[cC][cC][dD]
+*.[cC][cC][dD][aA]
+*.[dD][oO][cC][xX]
+*.[xX][lL][sS][xX]
 # Browser captures and bulk exports: cookies, tokens and records.
-*.har
-*.ndjson
+*.[hH][aA][rR]
+*.[nN][dD][jJ][sS][oO][nN]
 # Credentials.
 client-id
 .this-is-you-*keys/
 secrets/
 ts_authkey
-*.pem
-*.key
-*.p12
-*.pfx
-*.kdbx
+*.[pP][eE][mM]
+*.[kK][eE][yY]
+*.[pP]12
+*.[pP][fF][xX]
+*.[kK][dD][bB][xX]
 id_rsa
 id_ed25519
 

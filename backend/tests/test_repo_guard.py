@@ -39,7 +39,7 @@ def test_ordinary_source_passes(repo):
 
 
 @pytest.mark.parametrize("name", [
-    "report.pdf", "REPORT.PDF", "records/lab.pdf", "archive.sqlite3", "archive.sqlite3-wal", "archive.sqlite3-shm",
+    "report.pdf", "REPORT.PDF", "Scan.Pdf", "ARCHIVE.SQLITE3", "TLS.KEY", "SERVER.PEM", "Session.HAR", "Export.NDJSON", "records/lab.pdf", "archive.sqlite3", "archive.sqlite3-wal", "archive.sqlite3-shm",
     "archive.sqlite3.before-upgrade-20260101T000000", "x.db", "this-is-you-backup-20260101T000000Z.tiyb",
     "this-is-you-backup-20260101T000000Z.tiyb.incomplete", "this-is-you-backup-20260101T000000Z/manifest.json",
     "backup-key.json", ".env", ".env.production", "deploy/.env", "server.pem", "tls.key", "secrets/ts_authkey", "ts_authkey",
@@ -90,8 +90,10 @@ def test_this_repository_s_tracked_files_pass():
 
 
 def test_git_ignores_what_could_hold_records():
-    names = ["a.pdf", "x/a.PDF", "archive.sqlite3-wal", "archive.sqlite3.before-upgrade-1", "a.tiyb", "a.tiyb.check.json", "this-is-you-backup-1/manifest.json", "backup-key.json", ".env", "deploy/.env", "secrets/ts_authkey", "originals/a", "set-aside/a", "x.pem", "x.key", "service.lock"]
-    ignored = subprocess.run(["git", "-C", str(REPO), "check-ignore", "--no-index", *names], capture_output=True, text=True).stdout.split("\n")
+    # Upper case too, as cameras, scanners and portals often name files, and on a case-sensitive disk Git sees the difference.
+    names = ["a.pdf", "x/a.PDF", "Scan.Pdf", "a.HEIC", "a.TIFF", "ARCHIVE.SQLITE3", "x.DB", "x.PEM", "x.KEY", "a.DOCX", "a.HAR", "a.NDJSON", "a.TIYB", "archive.sqlite3-wal", "archive.sqlite3.before-upgrade-1", "a.tiyb", "a.tiyb.check.json", "this-is-you-backup-1/manifest.json", "backup-key.json", ".env", "deploy/.env", "secrets/ts_authkey", "originals/a", "set-aside/a", "x.pem", "x.key", "service.lock"]
+    # Case-sensitive here too, so a Mac checks what Linux does.
+    ignored = subprocess.run(["git", "-C", str(REPO), "-c", "core.ignorecase=false", "check-ignore", "--no-index", *names], capture_output=True, text=True).stdout.split("\n")
     assert sorted(n for n in names if n not in ignored) == []
 
 

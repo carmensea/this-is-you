@@ -253,3 +253,71 @@ def test_reader_output_is_treated_as_untrusted():
     result = parse_output(b'{"status":"extracted","text_sha256":"short","proposals":[{"field":"verified","value":"x","confidence":"high","page":1},{"field":"provider","value":"ok","confidence":"certain","page":1},{"field":"provider","value":"ok","confidence":"high","page":1}]}')
     assert result.text_sha256 is None
     assert [p["confidence"] for p in result.proposals] == ["high"]
+
+
+# ---- A reader started by a service that once used a lot of memory. Linux keeps a process's peak across exec.
+
+ON_LINUX = pytest.mark.skipif(sys.platform != "linux", reason="Linux keeps peak memory across exec; other systems start afresh")
+
+
+def _hold(mib: int) -> bytearray:
+    block = bytearray(mib * 1024 ** 2)
+    for i in range(0, len(block), 4096):
+        block[i] = 1  # Touched, so it is really resident and raises this process's peak.
+    return block
+
+
+def test_a_service_that_once_used_a_lot_of_memory_still_reads_small_pdfs(tmp_path):
+    held = _hold(1200)  # More than the reader's 1 GiB limit, as a long-running service can reach.
+    path = tmp_path / "report.pdf"
+    path.write_bytes(pdfs.text_pdf(pdfs.LAB_REPORT))
+    result = extract(path, Limits(), date(2026, 11, 1))
+    del held
+    assert result.status == "extracted" and result.lab_rows
+
+
+def test_a_memory_hog_is_still_stopped_after_the_service_used_a_lot(tmp_path):
+    held = _hold(1200)
+    command = _script(tmp_path, """
+        from this_is_you.extraction.worker import apply_limits
+        apply_limits({"cpu_seconds": 20, "memory_bytes": 200 * 1024 ** 2})
+        blocks = []
+        while True:
+            blocks.append(bytearray(b"x" * (10 * 1024 ** 2)))
+    """)
+    started = time.monotonic()
+    status = run_command(command, 20).status
+    del held
+    assert status == "too_complex" and time.monotonic() - started < 15
+
+
+@ON_LINUX
+def test_on_linux_the_watchdog_sees_memory_now_not_an_inherited_peak(tmp_path):
+    command = _script(tmp_path, """
+        import json, resource
+        from this_is_you.extraction.worker import resident_bytes
+        block = bytearray(300 * 1024 ** 2)
+        for i in range(0, len(block), 4096):
+            block[i] = 1
+        del block
+        print(json.dumps({"now": resident_bytes()(), "peak": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024}))
+    """)
+    import json, subprocess
+    seen = json.loads(subprocess.run(command, capture_output=True, text=True, check=True).stdout)
+    assert seen["peak"] > 300 * 1024 ** 2 and seen["now"] < 150 * 1024 ** 2
+
+
+@ON_LINUX
+def test_on_linux_the_address_space_limit_is_enforced_in_the_reader(tmp_path):
+    command = _script(tmp_path, """
+        import resource
+        from this_is_you.extraction.worker import apply_limits
+        apply_limits({"cpu_seconds": 20, "memory_bytes": 300 * 1024 ** 2})
+        assert resource.getrlimit(resource.RLIMIT_AS) == (300 * 1024 ** 2, 300 * 1024 ** 2)
+        try:
+            bytearray(400 * 1024 ** 2)
+        except MemoryError:
+            print("refused")
+    """)
+    import subprocess
+    assert subprocess.run(command, capture_output=True, text=True, timeout=30).stdout.strip() == "refused"
