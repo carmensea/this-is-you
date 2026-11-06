@@ -1136,3 +1136,23 @@ def test_the_reader_rebuilds_a_socket_that_was_replaced(reader):
         except OSError:
             time.sleep(0.25)
     raise AssertionError("the reader did not rebuild its socket")
+
+
+def test_a_database_error_never_carries_the_values_it_was_given(tmp_path):
+    """An unexpected database error ends up in the server's log. Its message must not hold a result or a filename."""
+    import traceback
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    from this_is_you.db import make_engine
+
+    secret = "Fictional Lab " + "Report 2024.pdf"  # Built here, so a traceback quoting this file's lines cannot show it.
+    engine = make_engine(tmp_path / "archive.sqlite3")
+    with engine.begin() as c:
+        c.execute(text("CREATE TABLE t (name TEXT NOT NULL UNIQUE)"))
+        c.execute(text("INSERT INTO t VALUES (:v)"), {"v": secret})
+    with pytest.raises(DBAPIError) as raised, engine.begin() as c:
+        c.execute(text("INSERT INTO t VALUES (:v)"), {"v": secret})
+    told = "".join(traceback.format_exception(raised.value))
+    assert "UNIQUE" in told and "hidden" in told and secret not in told

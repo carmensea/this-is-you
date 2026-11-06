@@ -44,6 +44,8 @@ def test_ordinary_source_passes(repo):
     "this-is-you-backup-20260101T000000Z.tiyb.incomplete", "this-is-you-backup-20260101T000000Z/manifest.json",
     "backup-key.json", ".env", ".env.production", "deploy/.env", "server.pem", "tls.key", "secrets/ts_authkey", "ts_authkey",
     "originals/ab/cd/x.txt", "set-aside/notes.txt", "ThisIsYou.replaced-20260101T000000Z/notes.txt", "scan.heic", "chart.dcm",
+    # A browser capture holds cookies and tokens; a bulk export holds records; connector credentials live in a folder of their own.
+    "session.har", "export/Observation.ndjson", "client-id", ".this-is-you-epic-sandbox-keys/notes.txt",
 ])
 def test_names_that_look_like_records_or_secrets_are_refused_even_when_forced(repo, name):
     answer = _staged(repo, name, b"fictional")
@@ -56,7 +58,7 @@ def test_contents_are_caught_under_an_innocent_name(repo, body):
 
 
 # Built at run time, so this test file holds nothing that looks like a real secret.
-@pytest.mark.parametrize("body", ["-----BEGIN " + "OPENSSH PRIVATE KEY-----", "ghp_" + "a" * 36, "tskey-" + "auth-fictional123", "sk-ant-" + "a" * 40, "AKIA" + "A" * 16])
+@pytest.mark.parametrize("body", ["eyJ" + "a" * 20 + ".eyJ" + "b" * 20 + "." + "c" * 20, "-----BEGIN " + "OPENSSH PRIVATE KEY-----", "ghp_" + "a" * 36, "tskey-" + "auth-fictional123", "sk-ant-" + "a" * 40, "AKIA" + "A" * 16])
 def test_secrets_inside_a_source_file_are_caught_and_not_printed(repo, body):
     answer = _staged(repo, "config.py", f"VALUE = '{body}'\n".encode())
     assert answer.returncode == 1 and body not in answer.stderr + answer.stdout
@@ -91,3 +93,8 @@ def test_git_ignores_what_could_hold_records():
     names = ["a.pdf", "x/a.PDF", "archive.sqlite3-wal", "archive.sqlite3.before-upgrade-1", "a.tiyb", "a.tiyb.check.json", "this-is-you-backup-1/manifest.json", "backup-key.json", ".env", "deploy/.env", "secrets/ts_authkey", "originals/a", "set-aside/a", "x.pem", "x.key", "service.lock"]
     ignored = subprocess.run(["git", "-C", str(REPO), "check-ignore", "--no-index", *names], capture_output=True, text=True).stdout.split("\n")
     assert sorted(n for n in names if n not in ignored) == []
+
+
+@pytest.mark.parametrize("name", ["docs/jwks-example.json", "tools/perf/baselines/after.json", "src/data/notes.md"])
+def test_ordinary_json_and_docs_still_pass(repo, name):
+    assert _staged(repo, name, b'{"keys": [{"kty": "RSA", "n": "fictional", "e": "AQAB"}]}').returncode == 0

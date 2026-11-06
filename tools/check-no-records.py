@@ -25,11 +25,15 @@ FORBIDDEN_PATH = re.compile(
     r"|(^|/)this-is-you-backup-"
     r"|\.sqlite\d?\."
     r"|\.replaced-"
-    r"|(^|/)(ts_authkey|backup-key\.json|service\.lock|id_rsa|id_ed25519)$"
+    r"|(^|/)(ts_authkey|backup-key\.json|service\.lock|id_rsa|id_ed25519|client-id)$"
+    # A browser capture holds cookies and tokens, a bulk export holds records, and connector credentials keep a folder of their own.
+    r"|\.(har|ndjson)$"
+    r"|(^|/)\.this-is-you-[^/]*keys(/|$)"
 )
 FORBIDDEN_START = {b"%PDF-": "a PDF", b"SQLite format 3": "a database", b"TIYBACKUP": "an encrypted backup"}
 SECRETS = {
     "a private key": re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY"),
+    "an access or session token": re.compile(rb"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
     "a GitHub token": re.compile(rb"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}"),
     "a Tailscale key": re.compile(rb"\btskey-[a-zA-Z0-9-]{10,}"),
     "an API key": re.compile(rb"\bsk-(?:ant-)?[A-Za-z0-9_-]{32,}|\bAKIA[0-9A-Z]{16}\b|\bAIza[0-9A-Za-z_-]{35}\b|\bxox[abprs]-[A-Za-z0-9-]{10,}"),

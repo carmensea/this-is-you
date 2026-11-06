@@ -284,7 +284,7 @@ A Mac that goes to sleep freezes the browser along with everything else, which l
 - **Stays on this computer.** Both servers bind to loopback. The service also refuses any connection that is not from loopback, even if someone starts it with a wider address directly.
 - **No outside services.** No analytics, telemetry or CDN. Fonts are bundled. The API docs pages are off because they load scripts from a CDN.
 - **Other websites are shut out.** Host header checks stop DNS rebinding, uploads need a custom header other sites cannot send, cross-site requests are refused, and no CORS access is granted.
-- **No health data in logs.** Access logs are off. The service logs only a document id, an outcome, a count and a size.
+- **No health data in logs.** Access logs are off. The service logs only a document id, an outcome, a count and a size. Database errors never repeat the values they were given.
 - **Files are served safely.** Always as `application/pdf`, with `nosniff`, `no-store` and a restrictive content security policy.
 
 **If a read fails,** the app tries again a few times, then shows what failed with a **Retry** button: no answer from the service, or an error from it. It never shows demo data or an empty archive in place of your records. If a refresh fails during use, your records stay on screen, marked as possibly out of date.
@@ -292,6 +292,8 @@ A Mac that goes to sleep freezes the browser along with everything else, which l
 **Signing in.** Every route needs a session except status and sign-in. The passphrase is set only from the command line, so nothing that reaches the service can claim your archive. A device stays signed in for 14 days at most, or until it goes 3 days unused. `npm run backend -- doctor` shows where your archive stands, and `sign-out-everywhere` ends every session.
 
 **Known limits.** Read [docs/threat-model.md](docs/threat-model.md), which separates websites, other devices, other accounts and a compromised host. The main one: **another program running under your own account can read everything directly**, and no login changes that. Run this under its own account on a dedicated machine. Identity details, the live archive and plain backups are not encrypted by this app, so keep disk encryption on. A PDF is opened by your browser's own viewer, so it is only as safe as that viewer. The dev server is not a hardened production setup.
+
+**Reporting a problem.** Security problems go privately through GitHub, as [SECURITY.md](SECURITY.md) explains. Everything else is welcome as an issue, with **fictional data only**: never real records, screenshots of a real archive, logs or tokens. [CONTRIBUTING.md](CONTRIBUTING.md) has the rules and the Git hooks that keep records out of commits.
 
 ## Demo mode
 

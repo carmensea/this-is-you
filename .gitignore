@@ -49,7 +49,12 @@ backup-staging/
 *.ccda
 *.docx
 *.xlsx
+# Browser captures and bulk exports: cookies, tokens and records.
+*.har
+*.ndjson
 # Credentials.
+client-id
+.this-is-you-*keys/
 secrets/
 ts_authkey
 *.pem

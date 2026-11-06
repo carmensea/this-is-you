@@ -17,7 +17,8 @@ from sqlalchemy import Engine, create_engine, event
 def make_engine(database_path: Path) -> Engine:
     # SQLite gives the -wal and -shm files the same permissions as this one.
     os.close(os.open(database_path, os.O_CREAT | os.O_RDWR, 0o600))
-    engine = create_engine(f"sqlite:///{database_path}")
+    # An error message must never carry the values it was given: results and filenames are health information, and errors get logged.
+    engine = create_engine(f"sqlite:///{database_path}", hide_parameters=True)
 
     @event.listens_for(engine, "connect")
     def configure(connection, _record) -> None:
