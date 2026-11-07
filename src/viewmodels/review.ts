@@ -593,7 +593,8 @@ export function reviewVM(store: AppStore) {
     rvKey: keys,
     rvApprovedGroups: [...approvedTogether.entries()].map(([groupId, rows]) => ({
       id: groupId,
-      text: `${countAndDate(rows)} ${rows.length === 1 ? 'was' : 'were'} approved as a group on ${fShort(rows[0].revisions[rows[0].revisions.length - 1].occurred_at.slice(0, 10))}.`,
+      text: `${countAndDate(rows)} ${rows.length === 1 ? 'was' : 'were'} accepted together on ${fShort(rows[0].revisions[rows[0].revisions.length - 1].occurred_at.slice(0, 10))}.`,
+      undoLabel: `Undo all ${rows.length}`,
       onUndo: () => void store.undoGroup(groupId),
     })),
     // The end of the workspace: what was decided, and the one action that marks the document as reviewed.

@@ -372,3 +372,24 @@ def test_accept_all_refuses_a_row_with_no_value(client):
     response = post(client, "/api/observations/accept-many", {"items": _shown(client, doc)})
     assert response.status_code == 422
     assert not verified(client)
+
+
+def test_undo_all_returns_an_accept_all_to_review_keeping_every_step_in_the_history(client):
+    doc = imported(client, pdfs.LIPID_BOUNDS)
+    post(client, "/api/observations/accept-many", {"items": _shown(client, doc)})
+    group = {o["approved_group_id"] for o in rows(client, doc)}
+    assert len(group) == 1 and None not in group
+    changed = rows(client, doc)[0]
+    post(client, f"/api/observations/{changed['id']}/correct", {"fields": {"value_text": "1"}})  # Changed by hand since: stays as it is.
+    assert post(client, f"/api/observations/group-approvals/{group.pop()}/undo").status_code == 200
+    after = {o["id"]: o for o in rows(client, doc)}
+    assert all(o["verification_status"] == "proposed" for o in after.values())
+    assert [r["action"] for r in after[changed["id"]]["revisions"]] == ["extracted", "verified", "corrected"]
+    assert all([r["action"] for r in o["revisions"]] == ["extracted", "verified", "reopened"] for i, o in after.items() if i != changed["id"])
+
+
+def test_accept_all_works_on_one_document_at_a_time(client):
+    a, b = imported(client, pdfs.LIPID_BOUNDS, "a.pdf"), imported(client, pdfs.CBC_VALUE_UNIT_RANGE, "b.pdf")
+    response = post(client, "/api/observations/accept-many", {"items": _shown(client, a)[:1] + _shown(client, b)[:1]})
+    assert response.status_code == 422
+    assert not verified(client)

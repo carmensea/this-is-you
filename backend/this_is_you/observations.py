@@ -419,7 +419,8 @@ def approve_group(sessions: sessionmaker[Session], document_id: str, group_key: 
 def accept_many(sessions: sessionmaker[Session], items: list[GroupItem]) -> int:
     """A person accepting every result they were shown at once. Each must still be undecided and unchanged, or nothing is accepted.
 
-    Each result gets its own "verified" revision, so each can still be undone on its own.
+    Each result gets its own "verified" revision, so each can still be undone on its own. The set is recorded as one group
+    approval, so Undo all (undo_group) can return all of it at once. Returns the group's id.
     """
     with sessions() as session:
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
@@ -431,14 +432,23 @@ def accept_many(sessions: sessionmaker[Session], items: list[GroupItem]) -> int:
             raise UploadRejected(409, "group_changed", "Some of these changed after they were shown, so nothing was accepted. Check them again.")
         if any(not o.value_text for o in found):
             raise _invalid("One of these has no value yet. Enter it from the original before approving.")
+        documents = {o.document_id for o in found}
+        if len(documents) != 1 or None in documents:
+            raise _invalid("Accept all works on one document at a time.")
+        dates = {o.collected_on for o in found}
         now = _now()
+        group = ReviewGroupApproval(document_id=documents.pop(), group_key="accept-all", collected_on=dates.pop() if len(dates) == 1 else None,
+                                    result_count=len(found), approved_at=now)
+        session.add(group)
+        session.flush()
         for o in found:
             o.verification_status = ObservationVerification.VERIFIED
-            o.approved_group_id = None
-            _revise(session, o, RevisionAction.VERIFIED, at=now)
+            o.approved_group_id = group.id
+            _revise(session, o, RevisionAction.VERIFIED, group.id, now)
         session.commit()
-    log.info("%d measurements: verified together", len(found))
-    return len(found)
+        group_id = group.id
+    log.info("accept all %s: %d measurements", group_id, len(found))
+    return group_id
 
 
 def undo_group(sessions: sessionmaker[Session], group_id: str) -> int:

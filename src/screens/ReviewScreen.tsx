@@ -315,7 +315,7 @@ function Measurements({ v }: { v: VM }) {
         <p key={g.id} style={{ ...s.body125, margin: '8px 0 0' }}>
           {g.text}{' '}
           <button onClick={g.onUndo} style={s.link12}>
-            Undo group approval
+            {g.undoLabel}
           </button>
         </p>
       ))}

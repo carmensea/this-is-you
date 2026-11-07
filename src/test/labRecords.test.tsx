@@ -987,22 +987,22 @@ describe('the review table', () => {
       rowKeys('ArrowDown');
       expect(store.state.rvPdfTarget).toMatchObject({ page: 1, text: 'LDL Cholesterol 118 mg/dL <100', value: 'Few' });
     });
-    it('offers undo for a group approval, and says when it happened', async () => {
+    it('offers Undo all for rows accepted together, and says when it happened', async () => {
       const gid = 'e'.repeat(32);
       const row = obs({ approved_group_id: gid, collected_on: '2020-06-15', verification_status: 'verified', revisions: [{ action: 'verified', values: {}, occurred_at: '2026-10-20T10:00:00Z', review_group_id: gid }] });
       const { backend, container } = open([row]);
-      expect(container.textContent).toContain(`1 result collected ${fLong('2020-06-15')} was approved as a group on ${fShort('2026-10-20')}.`);
+      expect(container.textContent).toContain(`1 result collected ${fLong('2020-06-15')} was accepted together on ${fShort('2026-10-20')}.`);
       openRow();
       expect(container.textContent).toContain('as part of a group');
       await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: 'Undo group approval' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Undo all 1' }));
       });
       expect(backend.undoGroup).toHaveBeenCalledWith(gid);
     });
     it('shows a result approved alone with no group wording or undo', () => {
       const { container } = open([obs({ verification_status: 'verified', approved_group_id: null })]);
       openRow();
-      expect(screen.queryByRole('button', { name: 'Undo group approval' })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Undo all/ })).toBeNull();
       expect(container.textContent).not.toContain('as part of a group');
     });
   });
