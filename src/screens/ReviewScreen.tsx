@@ -309,6 +309,21 @@ function Measurements({ v }: { v: VM }) {
         </p>
       )}
       <ResultList lines={v.rvLines} onKey={v.rvKey} testNames={v.testNames} label="Measurements, in the order printed" keysId="review-keys" />
+      {v.rvReplaced.length > 0 && (
+        <details style={{ borderTop: `1px solid ${C.rule2}`, padding: '10px 8px 0' }}>
+          <summary style={{ ...s.body125, cursor: 'pointer' }}>
+            {v.rvReplaced.length === 1 ? '1 earlier proposal' : `${v.rvReplaced.length} earlier proposals`} replaced by a newer reading
+          </summary>
+          {v.rvReplaced.map((x) => (
+            <p key={x.id} style={{ ...s.body125, color: C.ink2, margin: 0, padding: '8px 0', borderBottom: `1px solid ${C.rule2}` }}>
+              {x.text}{' '}
+              <button onClick={x.onRestore} style={s.link12}>
+                Restore to decide again
+              </button>
+            </p>
+          ))}
+        </details>
+      )}
       {v.rvIsReal && (
         <div style={{ borderTop: `1px solid ${C.rule2}`, padding: '10px 8px 0' }}>
           <button onClick={v.rvToggleAdd} style={s.link125}>

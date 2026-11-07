@@ -76,6 +76,7 @@ class ObservationVerification(str, enum.Enum):
     PROPOSED = "proposed"
     VERIFIED = "verified"
     REJECTED = "rejected"
+    SUPERSEDED = "superseded"  # A newer reading, asked for by a person, no longer finds it. Never a person's decision.
 
 
 class ObservationExtraction(str, enum.Enum):
@@ -95,6 +96,7 @@ class RevisionAction(str, enum.Enum):
     REOPENED = "reopened"
     IMPORTED = "imported"  # Read from a connected provider, as proposed.
     PARSER_FIX = "parser_fix"  # A corrected confidence. Never a person's decision.
+    SUPERSEDED = "superseded"  # Replaced by a newer reading. Never a person's decision.
 
 
 class Confidence(str, enum.Enum):

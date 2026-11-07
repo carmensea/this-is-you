@@ -486,6 +486,14 @@ export function reviewVM(store: AppStore) {
       window.scrollTo(0, 0);
     },
     rvIsReal: !!real,
+    // What an earlier reading proposed and a newer one replaced. History only: restoring puts it back to decide.
+    rvReplaced: (real?.observations ?? [])
+      .filter((o) => o.verification_status === 'superseded')
+      .map((o) => ({
+        id: o.id,
+        text: `${o.reported_name}: ${o.value_text ? [o.value_text, o.unit].filter(Boolean).join(' ') : 'no value read'}${o.source_page ? `, page ${o.source_page}${o.source_line ? ` line ${o.source_line}` : ''}` : ''}. Replaced by a newer reading${o.revisions.length ? ` on ${fShort(o.revisions[o.revisions.length - 1].occurred_at.slice(0, 10))}` : ''}.`,
+        onRestore: () => void store.setObservationStatus(o.id, 'reopen'),
+      })),
     rvContentUrl: d.contentUrl ?? null,
     rvPdfTarget: s.rvPdfTarget,
     rvFileUrl: d.contentUrl ?? null,

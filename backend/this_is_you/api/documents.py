@@ -158,7 +158,8 @@ async def set_review(request: Request, document_id: DocumentId) -> DocumentDetai
 
 @router.post("/{document_id}/extract", response_model=DocumentDetail)
 def read_again(request: Request, document_id: DocumentId) -> DocumentDetail:
-    """Read the file again. Adds new proposals and leaves every decision in place."""
+    """Read the file again. Adds new proposals, replaces untouched ones it no longer finds, and leaves every decision in place."""
     metadata.request_reread(request.app.state.sessions, document_id)
+    request.app.state.rereads.add(document_id)
     request.app.state.extraction.enqueue(document_id)
     return _detail(request, document_id)

@@ -176,7 +176,7 @@ function DocumentDetail({ v }: { v: VM }) {
             )}
             {v.detail.ddCanReread && (
               <button onClick={v.detail.ddReread} style={s.link125}>
-                Try reading again
+                {v.detail.ddRereadLabel}
               </button>
             )}
             {v.detail.ddHasDup && (
@@ -195,6 +195,20 @@ function DocumentDetail({ v }: { v: VM }) {
             </button>
             {v.detail.ddCanDelete && <DeleteDocument name={v.detail.ddDeleteName} what={v.detail.ddDeleteWhat} onDelete={v.detail.ddDelete} />}
           </div>
+          {v.detail.ddRereadResult && (
+            <p
+              role="status"
+              style={{
+                margin: '12px 0 0',
+                padding: '6px 0 6px 10px',
+                borderLeft: `2px solid ${v.detail.ddRereadResult.ok ? C.green : C.rust}`,
+                fontSize: 13,
+                color: C.ink2,
+              }}
+            >
+              {v.detail.ddRereadResult.text}
+            </p>
+          )}
           <div
             style={{
               display: 'grid',
@@ -360,53 +374,59 @@ function DocumentDetail({ v }: { v: VM }) {
                   flexWrap: 'wrap',
                 }}
               >
-                <h3 style={s.heading3}>Extracted measurements</h3>
+                <h3 style={s.heading3}>{v.detail.ddLinesHead}</h3>
                 <span style={s.muted12}>{v.detail.ddLinesCount}</span>
               </div>
               {v.detail.ddCanReview && (
                 <button
                   onClick={v.detail.ddReview}
-                  style={{ fontSize: 13, fontWeight: 500, background: C.ink, color: C.paper, padding: '7px 12px', marginTop: 12 }}
+                  style={
+                    v.detail.ddToReview
+                      ? { fontSize: 13, fontWeight: 500, background: C.ink, color: C.paper, padding: '7px 12px', marginTop: 12 }
+                      : { ...s.link125, display: 'block', marginTop: 12 }
+                  }
                 >
                   {v.detail.ddMeasuresLabel}
                 </button>
               )}
-              <div style={{ overflowX: 'auto' }}>
-                <div style={{ minWidth: 560 }}>
-                  {v.detail.ddExtracted.map((x, i5) => (
-                    <div
-                      key={i5}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'minmax(0,1.5fr) 110px 80px 22px 104px auto',
-                        gap: 10,
-                        alignItems: 'baseline',
-                        padding: '8px 4px',
-                        borderBottom: `1px solid ${C.rule2}`,
-                        background: x.bg,
-                        fontSize: 12.5,
-                      }}
-                    >
-                      <span>{x.name}</span>
-                      <span style={{ fontFamily: MONO, fontSize: 12 }}>{x.value}</span>
-                      <span style={{ fontFamily: MONO, fontSize: 11.5, color: C.ink2 }}>{x.ref}</span>
-                      <span style={{ fontFamily: MONO, fontSize: 11.5, fontWeight: 500, color: C.rust }}>{x.flag}</span>
-                      <span style={{ fontSize: 11.5, color: x.statusColor }}>{x.status}</span>
-                      <span style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                        <button onClick={x.onLocate} style={s.link12}>
-                          Locate in original
-                        </button>
-                        <button
-                          onClick={x.onChart}
-                          style={{ fontSize: 12, color: C.green, borderBottom: `1px solid ${C.green}` }}
-                        >
-                          Chart
-                        </button>
-                      </span>
-                    </div>
-                  ))}
+              {v.detail.ddExtracted.length > 0 && (
+                <div style={{ overflowX: 'auto' }}>
+                  <div style={{ minWidth: 560 }}>
+                    {v.detail.ddExtracted.map((x, i5) => (
+                      <div
+                        key={i5}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(0,1.5fr) 110px 80px 22px 104px auto',
+                          gap: 10,
+                          alignItems: 'baseline',
+                          padding: '8px 4px',
+                          borderBottom: `1px solid ${C.rule2}`,
+                          background: x.bg,
+                          fontSize: 12.5,
+                        }}
+                      >
+                        <span>{x.name}</span>
+                        <span style={{ fontFamily: MONO, fontSize: 12 }}>{x.value}</span>
+                        <span style={{ fontFamily: MONO, fontSize: 11.5, color: C.ink2 }}>{x.ref}</span>
+                        <span style={{ fontFamily: MONO, fontSize: 11.5, fontWeight: 500, color: C.rust }}>{x.flag}</span>
+                        <span style={{ fontSize: 11.5, color: x.statusColor }}>{x.status}</span>
+                        <span style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                          <button onClick={x.onLocate} style={s.link12}>
+                            Locate in original
+                          </button>
+                          <button
+                            onClick={x.onChart}
+                            style={{ fontSize: 12, color: C.green, borderBottom: `1px solid ${C.green}` }}
+                          >
+                            Chart
+                          </button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}{' '}
           {v.detail.ddHasRecord && (

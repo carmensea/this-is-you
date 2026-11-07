@@ -3,7 +3,7 @@ import type { LabObservation } from '../domain/types';
 import type { AppStore } from '../state/store';
 import { resultLines, type ResultInput } from './review';
 
-const STATUS: Record<LabObservation['verification_status'], string> = { proposed: 'pending', verified: 'confirmed', rejected: 'excluded' };
+const STATUS: Record<LabObservation['verification_status'], string> = { proposed: 'pending', verified: 'confirmed', rejected: 'excluded', superseded: 'excluded' };
 
 /** Results read from connected providers, decided one at a time exactly as a document's are, with the same history. */
 export function providerResultsVM(store: AppStore) {

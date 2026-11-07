@@ -115,12 +115,20 @@ def _revise(session: Session, o: Observation, action: RevisionAction, group_id: 
     session.add(ObservationRevision(observation=o, action=action, values=_snapshot(o), occurred_at=at or _now(), review_group_id=group_id))
 
 
-def add_extracted_rows(session: Session, document: Document, run_id: int, rows: list[dict]) -> None:
-    """Adds what a reading found. Rows already known stay as they are, including rejected ones."""
+def add_extracted_rows(session: Session, document: Document, run_id: int, rows: list[dict], supersede: bool = False) -> tuple[int, int]:
+    """Adds what a reading found. Rows already known stay as they are, including rejected ones.
+
+    With supersede, which only a person's request to read again and a complete reading give: a proposal nobody has touched,
+    on a page where this reading found something new, that this reading no longer finds, is marked as replaced. Never deleted.
+    A page with nothing new was read the same way as before, so a row missing there is not taken as replaced.
+    Returns how many rows were added and how many were replaced.
+    """
     existing = session.scalars(select(Observation).where(Observation.document_id == document.id, Observation.origin == ObservationOrigin.EXTRACTED)).all()
     # Without the line: a newer reading can number the lines of a page differently, and the same result should not appear twice.
-    known = {(o.revisions[0].values["reported_name"], o.revisions[0].values["value_text"], o.source_page) for o in existing if o.revisions}
+    known = {_found_key(o) for o in existing if o.revisions}
     seen = set()
+    added = 0
+    new_on = set()
     for row in rows:
         if (row["name"], row["value"], row["page"]) in known or (row["name"], row["value"], row["page"], row["line"]) in seen:
             continue
@@ -138,12 +146,35 @@ def add_extracted_rows(session: Session, document: Document, run_id: int, rows: 
         _derive(o)
         session.add(o)
         _revise(session, o, RevisionAction.EXTRACTED)
+        added += 1
+        new_on.add(row["page"])
+    replaced = 0
+    if supersede and new_on:
+        found = {(row["name"], row["value"], row["page"]) for row in rows}
+        now = _now()
+        for o in existing:
+            if _untouched_proposal(o) and o.source_page in new_on and _found_key(o) not in found:
+                o.verification_status = ObservationVerification.SUPERSEDED
+                session.add(ObservationRevision(observation=o, action=RevisionAction.SUPERSEDED, values={**_snapshot(o), "superseded_by_run": run_id}, occurred_at=now))
+                replaced += 1
+    return added, replaced
+
+
+def _found_key(o: Observation) -> tuple:
+    return (o.revisions[0].values["reported_name"], o.revisions[0].values["value_text"], o.source_page)
+
+
+def _untouched_proposal(o: Observation) -> bool:
+    """Still exactly what a reading proposed: no person has accepted, corrected, rejected or reopened it."""
+    return o.verification_status is ObservationVerification.PROPOSED and bool(o.revisions) and all(
+        r.action in (RevisionAction.EXTRACTED, RevisionAction.PARSER_FIX) for r in o.revisions)
 
 
 def unresolved_count(session: Session, document_id: str) -> int:
     return len(session.scalars(select(Observation.id).where(Observation.document_id == document_id, Observation.verification_status == ObservationVerification.PROPOSED)).all())
 
 
+_SET_ASIDE = (ObservationVerification.REJECTED, ObservationVerification.SUPERSEDED)
 _FULL = (selectinload(Observation.revisions),)
 
 
@@ -190,7 +221,7 @@ def possible_duplicates(observations: list[Observation]) -> dict[str, list[str]]
     """Results that say the same thing: same test, same date, same value, same unit. Not merged."""
     groups: dict[tuple, list[str]] = {}
     for o in observations:
-        if o.verification_status is ObservationVerification.REJECTED or not o.collected_on:
+        if o.verification_status in _SET_ASIDE or not o.collected_on:
             continue
         name = o.test_code or " ".join(o.reported_name.lower().split())
         # By number where there is one, so 14.2 from a provider and 14.20 from a PDF are the same result.
@@ -336,7 +367,7 @@ def review_groups(observations: list[Observation]) -> dict[str, GroupInfo]:
     """Worked out each time from the results themselves, so nothing about a group can go out of date."""
     per_test: dict[tuple, int] = {}
     for o in observations:
-        if o.document_id and o.verification_status is not ObservationVerification.REJECTED and o.test_code:
+        if o.document_id and o.verification_status not in _SET_ASIDE and o.test_code:
             test_key = (o.document_id, _group_key(o), o.test_code)
             per_test[test_key] = per_test.get(test_key, 0) + 1
     info: dict[str, GroupInfo] = {}
@@ -404,3 +435,4 @@ def undo_group(sessions: sessionmaker[Session], group_id: str) -> int:
         session.commit()
     log.info("group approval %s: undone, %d measurements back in review", group_id, len(found))
     return len(found)
+

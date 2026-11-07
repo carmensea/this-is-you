@@ -58,11 +58,16 @@ def create_app(settings: Settings) -> FastAPI:
     # Without the sandbox it must have, nothing is read. Files are still stored, stay queued, and are read after a fix and restart.
     reading_allowed = sandbox.isolation() != sandbox.UNAVAILABLE
 
+    # Documents a person asked to read again. Only these may have old proposals replaced. Kept in memory, so after a
+    # restart an interrupted re-read finishes as a plain reading that only adds.
+    app.state.rereads = set()
+
     def read(document_id: str) -> None:
         if not reading_allowed:
             return
         try:
-            process_document(app.state.sessions, store, settings.extraction_limits, document_id)
+            process_document(app.state.sessions, store, settings.extraction_limits, document_id, document_id in app.state.rereads)
+            app.state.rereads.discard(document_id)
         except ReaderUnavailable:
             # The reader is restarting. Every document needs it, so waiting here holds them in order. Nothing is lost.
             log.warning("The reader container is not answering. Reading resumes when it does.")

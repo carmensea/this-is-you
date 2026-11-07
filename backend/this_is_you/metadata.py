@@ -49,7 +49,7 @@ def invalid(message: str) -> UploadRejected:
 
 # ---- Reading
 
-def record_result(session: Session, document: Document, result: ExtractionResult) -> None:
+def record_result(session: Session, document: Document, result: ExtractionResult, supersede: bool = False) -> None:
     run = ExtractionRun(
         document_id=document.id, method=METHOD, status=ExtractionStatus(result.status), finished_at=utc_now(), page_count=result.page_count,
         pages_read=result.pages_read, pages_with_text=result.pages_with_text, pages_failed=result.pages_failed, truncated=result.truncated, text_sha256=result.text_sha256, patient_found=result.patient,
@@ -59,10 +59,13 @@ def record_result(session: Session, document: Document, result: ExtractionResult
     session.add(run)
     session.flush()
     document.extraction_status = run.status
-    add_extracted_rows(session, document, run.id, result.lab_rows)
+    # Replacing old proposals needs the whole file read. A failed or partial reading never replaces anything.
+    complete = run.status is ExtractionStatus.EXTRACTED and not result.truncated and not result.pages_failed
+    add_extracted_rows(session, document, run.id, result.lab_rows, supersede=supersede and complete)
 
 
-def process_document(sessions: sessionmaker[Session], store: OriginalStore, limits: Limits, document_id: str) -> None:
+def process_document(sessions: sessionmaker[Session], store: OriginalStore, limits: Limits, document_id: str, supersede: bool = False) -> None:
+    """supersede: a person asked for this one document to be read again, so proposals it no longer finds may be replaced."""
     with sessions() as session:
         document = session.get(Document, document_id)
         if document is None or document.extraction_status not in UNFINISHED:
@@ -81,7 +84,7 @@ def process_document(sessions: sessionmaker[Session], store: OriginalStore, limi
     with sessions() as session:
         document = session.get(Document, document_id)
         assert document is not None
-        record_result(session, document, result)
+        record_result(session, document, result, supersede)
         session.commit()
     log.info("document %s: extraction %s, %d proposals", document_id, result.status, len(result.proposals))
 

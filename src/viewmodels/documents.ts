@@ -26,16 +26,9 @@ function realExtractedRow(store: AppStore, documentId: string, o: LabObservation
     value: o.value_text + (o.unit ? ' ' + o.unit : ''),
     ref: o.reference_text ?? '',
     flag: o.flag ?? '',
-    status:
-      o.verification_status === 'verified'
-        ? o.origin === 'manual'
-          ? 'User-entered'
-          : 'Accepted'
-        : o.verification_status === 'rejected'
-          ? 'Rejected'
-          : 'Proposed',
-    statusColor:
-      o.verification_status === 'verified' ? C.green : o.verification_status === 'rejected' ? C.ink3 : C.amber,
+    // Only confirmed results reach this table. Undecided, rejected and replaced ones stay in the review.
+    status: o.origin === 'manual' ? 'User-entered' : o.edited ? 'Corrected' : 'Accepted',
+    statusColor: C.green,
     bg: 'transparent',
     onLocate: () => o.source_page && store.setState({ dSource: { id: documentId, page: o.source_page } }),
     onChart: () => {
@@ -224,7 +217,12 @@ export function documentsVM(store: AppStore) {
         : ['Not extracted', C.ink3];
   const preview = sel.draw != null && !sel.dup;
   const verifiedHere = sel.review?.observations.filter((o) => o.verification_status === 'verified').length ?? 0;
-  const real = sel.review?.observations;
+  // Replaced proposals are history. They are counted apart and listed only in the review.
+  const real = sel.review?.observations.filter((o) => o.verification_status !== 'superseded');
+  const count = (status: LabObservation['verification_status']) =>
+    sel.review?.observations.filter((o) => o.verification_status === status).length ?? 0;
+  const [open, confirmed, rejected, replaced] = [count('proposed'), count('verified'), count('rejected'), count('superseded')];
+  const reread = s.dReread?.id === sel.id ? s.dReread : null;
   return {
     ...out,
     detail: {
@@ -260,8 +258,11 @@ export function documentsVM(store: AppStore) {
         : '',
       ddDelete: () => store.deleteDocument(sel.id),
       ddDupLabel: sel.review ? 'Open the possible duplicate' : 'Open the original copy',
-      ddCanReread: sel.review?.extraction === 'failed' || sel.review?.extraction === 'too_complex',
+      ddCanReread: !!sel.review && !isReading(sel),
+      ddRereadLabel:
+        sel.review?.extraction === 'failed' || sel.review?.extraction === 'too_complex' ? 'Try reading again' : 'Read again with the current reader',
       ddReread: () => void store.readAgain(sel.id),
+      ddRereadResult: reread,
       ddFields: sel.review
         ? [
             ...FIELD_ORDER.map((key) => ({ k: FIELD_LABEL[key], v: describeField(key, sel.review!.fields[key]) })),
@@ -376,15 +377,26 @@ export function documentsVM(store: AppStore) {
         onClick: () => store.setState({ dHL: mk.key }),
       })),
       ddHasLines: real ? real.length > 0 : lines.length > 0 && !sel.dup,
-      ddMeasuresLabel: (() => {
-        const open = real ? real.filter((o) => o.verification_status === 'proposed').length : 0;
-        return open ? `Review measurements (${open} to decide)` : 'Review measurements';
-      })(),
+      ddLinesHead: real ? (open ? 'Measurements' : 'Confirmed measurements') : 'Extracted measurements',
+      ddToReview: open > 0,
+      ddMeasuresLabel: open ? 'Review measurements' : 'Change decisions or see the review history',
       ddLinesCount: real
-        ? `${plural(real.length, 'measurement')}: ${real.filter((o) => o.verification_status === 'verified').length} accepted, ${real.filter((o) => o.verification_status === 'rejected').length} rejected`
+        ? [
+            plural(real.length, 'measurement'),
+            confirmed || !open ? `${confirmed} confirmed` : '',
+            rejected ? `${rejected} rejected` : '',
+            open ? `${open} to review` : '',
+            replaced ? `${replaced} replaced by a newer reading` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')
         : plural(lines.length, 'measurement') + ' extracted from this report',
       ddExtracted: real
-        ? real.map((o) => realExtractedRow(store, sel.id, o))
+        ? real
+            .filter((o) => o.verification_status === 'verified')
+            // In the order printed, as the review shows them.
+            .sort((a, b) => (a.source_page ?? Infinity) - (b.source_page ?? Infinity) || (a.source_line ?? Infinity) - (b.source_line ?? Infinity))
+            .map((o) => realExtractedRow(store, sel.id, o))
         : lines.map(({ mk, r }, idx) => {
             const ls = lineStatus(mk.key);
             return {

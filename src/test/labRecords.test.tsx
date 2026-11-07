@@ -689,13 +689,6 @@ describe('the review table', () => {
       expect(dialog.textContent).toContain('Backups you already made still hold it');
       expect(backend.deleteDocument).not.toHaveBeenCalled();
     });
-    it('offers review beside the measurements, opening the same review screen for this document', () => {
-      const { store } = openDocument([proposed(), proposed({ id: 'b'.repeat(32) }), proposed({ id: 'c'.repeat(32), verification_status: 'verified' })]);
-      fireEvent.click(screen.getByRole('button', { name: 'Review measurements (2 to decide)' }));
-      expect(store.state.view).toBe('import');
-      expect(store.state.rvDoc).toBe('d'.repeat(32));
-      expect(store.state.returnTo).toEqual({ view: 'documents', y: 0 });
-    });
     it('does nothing on Cancel', () => {
       const { backend } = openDocument([proposed()]);
       offer();
@@ -719,6 +712,94 @@ describe('the review table', () => {
       await confirm();
       expect(screen.getByRole('alert').textContent).toContain('still being read');
       expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeTruthy();
+    });
+  });
+  describe('the document page shows what is known, and the review is where to decide', () => {
+    const D = 'd'.repeat(32);
+    const openPage = (rows: LabObservation[], backend = fakeBackend()) => {
+      backend.listObservations = vi.fn(async () => rows);
+      return { ...mount(rows, { view: 'documents', dSel: D }, backend), backend };
+    };
+    const section = () => screen.getByRole('heading', { level: 3, name: /measurements$/i }).parentElement!.parentElement!;
+    const named = (name: string, over: Partial<LabObservation> = {}) =>
+      obs({ reported_name: name, source_text: `${name} 1 mg/dL`, ...over });
+
+    it('while results are undecided: a summary, one Review button, and no table of proposals', () => {
+      const { store } = openPage([
+        named('Fictional Alpha', { verification_status: 'proposed' }),
+        named('Fictional Beta', { verification_status: 'proposed' }),
+        named('Fictional Gamma'),
+      ]);
+      expect(section().textContent).toContain('3 measurements · 1 confirmed · 2 to review');
+      expect(within(section()).getAllByRole('button', { name: /review/i })).toHaveLength(1);
+      // Only what a person confirmed is listed, with Locate and Chart.
+      expect(section().textContent).toContain('Fictional Gamma');
+      expect(section().textContent).not.toContain('Fictional Alpha');
+      expect(within(section()).getAllByRole('button', { name: 'Locate in original' })).toHaveLength(1);
+      fireEvent.click(within(section()).getByRole('button', { name: 'Review measurements' }));
+      expect(store.state.view).toBe('import');
+      expect(store.state.rvDoc).toBe(D);
+      expect(store.state.returnTo).toEqual({ view: 'documents', y: 0 });
+    });
+    it('once all are decided: the confirmed table, with rejected and replaced results left to the review history', () => {
+      openPage([
+        named('Fictional Alpha'),
+        named('Fictional Beta', { edited: true }),
+        named('Fictional Rejected', { verification_status: 'rejected' }),
+        named('Fictional Replaced', { verification_status: 'superseded' }),
+      ]);
+      expect(screen.getByRole('heading', { level: 3, name: 'Confirmed measurements' })).toBeTruthy();
+      expect(section().textContent).toContain('3 measurements · 2 confirmed · 1 rejected · 1 replaced by a newer reading');
+      expect(section().textContent).toContain('Corrected');
+      expect(section().textContent).not.toMatch(/Fictional Rejected|Fictional Replaced/);
+      expect(within(section()).getAllByRole('button', { name: 'Chart' })).toHaveLength(2);
+      expect(within(section()).getByRole('button', { name: 'Change decisions or see the review history' })).toBeTruthy();
+    });
+    it('the review leaves replaced proposals out of the decisions, and can restore one', () => {
+      const backend = fakeBackend();
+      const stale = named('Yellow', { verification_status: 'superseded', value_text: '', value_number: null, source_line: 7 });
+      const rows = [named('URINE-COLOR', { verification_status: 'proposed', value_text: 'Yellow', value_number: null }), stale];
+      backend.listObservations = vi.fn(async () => rows);
+      mount(rows, { view: 'import', rvDoc: D, rvStage: 'review' }, backend);
+      expect(screen.getByText(/1 of 1 measurement decided|0 of 1 measurement decided/)).toBeTruthy();
+      expect(screen.getByText('1 earlier proposal replaced by a newer reading')).toBeTruthy();
+      expect(screen.getByText(/Yellow: no value read, page 1 line 7\. Replaced by a newer reading/)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Restore to decide again' }));
+      expect(backend.setObservationStatus).toHaveBeenCalledWith(stale.id, 'reopen');
+    });
+    it('reads one document again on request, and says what changed and that decisions were kept', async () => {
+      const kept = named('Fictional Kept');
+      const stale = named('Yellow', { verification_status: 'proposed', value_text: '' });
+      const { backend } = openPage([kept, stale]);
+      const after = [kept, { ...stale, verification_status: 'superseded' as const }, named('URINE-COLOR', { verification_status: 'proposed' }), named('APPEARANCE', { verification_status: 'proposed' })];
+      backend.readAgain = vi.fn(async () => {
+        backend.listObservations = vi.fn(async () => after);
+        return toArchiveDocument(docDto());
+      });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Read again with the current reader' })); });
+      expect(backend.readAgain).toHaveBeenCalledTimes(1);
+      expect(backend.readAgain).toHaveBeenCalledWith(D);
+      expect(screen.getByRole('status').textContent).toBe(
+        'Read again with the current reader. 2 new measurements to review, 1 earlier proposal replaced by the newer reading, 1 decision kept unchanged.',
+      );
+    });
+    it('says so when a reading does not finish, and that nothing was replaced', async () => {
+      const { backend } = openPage([named('Fictional Kept')]);
+      backend.readAgain = vi.fn(async () => {
+        backend.listDocuments = vi.fn(async () => [toArchiveDocument(docDto({ extraction_status: 'partial' }))]);
+        return toArchiveDocument(docDto());
+      });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Read again with the current reader' })); });
+      expect(screen.getByRole('status').textContent).toBe(
+        'The reading did not finish (partly read), so no earlier proposal was replaced. No new measurements, 1 decision kept unchanged.',
+      );
+    });
+    it('says so when the request is refused, and that nothing changed', async () => {
+      const { backend } = openPage([named('Fictional Kept')]);
+      const { ArchiveRequestError } = await import('../services/archiveApi');
+      backend.readAgain = vi.fn(async () => { throw new ArchiveRequestError('This document is already being read.', 'already_reading'); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Read again with the current reader' })); });
+      expect(screen.getByRole('status').textContent).toBe('This document is already being read. Nothing was changed.');
     });
   });
   describe('one result at a time', () => {

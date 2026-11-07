@@ -1,10 +1,10 @@
 // Application state and actions. Plain TypeScript with no React, so it can be tested directly.
 import { addMonths, fLong } from '../domain/dates';
-import { rangeOnly, fmtR } from '../domain/format';
+import { plural, rangeOnly, fmtR } from '../domain/format';
 import { DCATL } from '../domain/vocabulary';
-import type { Archive, ArchiveDocument, ArchiveHealth, BackupListing, HealthEvent, IdentityDetails, ImportFile, ImportJob, ISODate, LowConfidenceNote, MetadataFieldKey, SnapshotMode } from '../domain/types';
+import type { Archive, ArchiveDocument, ArchiveHealth, BackupListing, HealthEvent, IdentityDetails, ImportFile, ImportJob, ISODate, LabObservation, LowConfidenceNote, MetadataFieldKey, SnapshotMode } from '../domain/types';
 import { ArchiveRequestError, type DocumentsBackend, type FieldDecision, type GroupApproval, type ObservationFieldValues } from '../services/archiveApi';
-import { FIELD_LABEL, FIELD_ORDER, displayValue, isReading } from '../domain/documentReview';
+import { EXTRACTION_LABEL, FIELD_LABEL, FIELD_ORDER, displayValue, isReading } from '../domain/documentReview';
 import { listOnly, simulateProcessing } from '../services/importService';
 import { buildPersonalArchive, todayLocal } from '../services/localArchiveApi';
 import { BatchImporter, emptyReport, type ReportState } from './batchImport';
@@ -145,6 +145,8 @@ export interface AppState {
   rvAdding: boolean;
   /** Which page of a document's original the Documents screen should show. */
   dSource: { id: string; page: number } | null;
+  /** What the last "Read again" did, for the document it was asked for. */
+  dReread: { id: string; ok: boolean; text: string } | null;
   /** The add-a-result form on the Import screen. */
   manualOpen: boolean;
   manualEdit: string | null;
@@ -216,6 +218,7 @@ export const initialState: AppState = {
   rvPdfTarget: null,
   rvAdding: false,
   dSource: null,
+  dReread: null,
   manualOpen: false,
   manualEdit: null,
   accepted: {},
@@ -392,7 +395,8 @@ export class AppStore {
         edited: f.state === 'corrected',
       };
     });
-    const inReportOrder = [...review.observations].sort(
+    // Replaced proposals are history, not decisions to make. The review lists them apart.
+    const inReportOrder = review.observations.filter((o) => o.verification_status !== 'superseded').sort(
       (a, b) => (a.source_page ?? Infinity) - (b.source_page ?? Infinity) || (a.source_line ?? Infinity) - (b.source_line ?? Infinity),
     );
     const lines: ReviewLine[] = inReportOrder.map((o) => ({
@@ -589,9 +593,52 @@ export class AppStore {
     }
   };
 
+  /** One document, at the person's request. The result compares what the archive held before with what it holds after. */
   readAgain = async (id: string) => {
-    if (await this.saving((backend) => backend.readAgain(id))) this.watchReading();
+    const before = new Map((this.archive.documentsById[id]?.review?.observations ?? []).map((o) => [o.id, o]));
+    this.rereading = { id, before };
+    this.setState({ dReread: { id, ok: true, text: 'Reading again with the current reader…' } });
+    if (await this.saving((backend) => backend.readAgain(id))) {
+      this.watchReading();
+      this.reportReread();
+    } else {
+      this.rereading = null;
+      this.setState({ dReread: { id, ok: false, text: `${this.state.rvError ?? 'This could not be started.'} Nothing was changed.` } });
+    }
   };
+
+  private rereading: { id: string; before: Map<string, LabObservation> } | null = null;
+
+  /** Once the reading has finished: what it added, what it replaced, and that every decision is as it was. */
+  private reportReread() {
+    const job = this.rereading;
+    const doc = job && this.archive.documentsById[job.id];
+    if (!job || !doc?.review || isReading(doc)) return;
+    this.rereading = null;
+    const after = doc.review.observations;
+    const added = after.filter((o) => !job.before.has(o.id)).length;
+    const replaced = after.filter((o) => o.verification_status === 'superseded' && job.before.get(o.id)?.verification_status === 'proposed').length;
+    const decided = [...job.before.values()].filter((o) => o.verification_status === 'verified' || o.verification_status === 'rejected');
+    const changed = decided.filter((o) => {
+      const now = after.find((x) => x.id === o.id);
+      return !now || now.revisions.length !== o.revisions.length;
+    }).length;
+    const complete = doc.review.extraction === 'extracted';
+    const parts = [
+      added ? `${plural(added, 'new measurement')} to review` : 'No new measurements',
+      replaced ? `${plural(replaced, 'earlier proposal')} replaced by the newer reading` : '',
+      changed ? `${plural(changed, 'decision')} changed, which should not happen: check the review history` : decided.length ? `${plural(decided.length, 'decision')} kept unchanged` : '',
+    ].filter(Boolean);
+    this.setState({
+      dReread: complete
+        ? { id: job.id, ok: !changed, text: `Read again with the current reader. ${parts.join(', ')}.` }
+        : {
+            id: job.id,
+            ok: false,
+            text: `The reading did not finish (${EXTRACTION_LABEL[doc.review.extraction].toLowerCase()}), so no earlier proposal was replaced. ${parts.join(', ')}.`,
+          },
+    });
+  }
 
   // Laboratory results
   setObservationStatus = (id: string, action: 'verify' | 'reject' | 'reopen') =>
@@ -668,6 +715,7 @@ export class AppStore {
     const check = async () => {
       this.readingTimer = null;
       await this.refreshDocuments(backend);
+      this.reportReread();
       if (this.archive.documents.some(isReading)) this.watchReading();
     };
     if (this.archive.documents.some(isReading) || this.uploadsSinceRefresh) {

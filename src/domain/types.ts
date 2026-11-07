@@ -61,7 +61,8 @@ export interface LabObservation {
   document_id: string | null;
   origin: 'extracted' | 'manual' | 'fhir';
   extraction_status: string;
-  verification_status: 'proposed' | 'verified' | 'rejected';
+  /** superseded: a newer reading a person asked for no longer finds it. Kept in the history, never a person's decision. */
+  verification_status: 'proposed' | 'verified' | 'rejected' | 'superseded';
   confidence: 'high' | 'medium' | 'low' | null;
   reported_name: string;
   test_code: string | null;
