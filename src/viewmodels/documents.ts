@@ -376,6 +376,10 @@ export function documentsVM(store: AppStore) {
         onClick: () => store.setState({ dHL: mk.key }),
       })),
       ddHasLines: real ? real.length > 0 : lines.length > 0 && !sel.dup,
+      ddMeasuresLabel: (() => {
+        const open = real ? real.filter((o) => o.verification_status === 'proposed').length : 0;
+        return open ? `Review measurements (${open} to decide)` : 'Review measurements';
+      })(),
       ddLinesCount: real
         ? `${plural(real.length, 'measurement')}: ${real.filter((o) => o.verification_status === 'verified').length} accepted, ${real.filter((o) => o.verification_status === 'rejected').length} rejected`
         : plural(lines.length, 'measurement') + ' extracted from this report',

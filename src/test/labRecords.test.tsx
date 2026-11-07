@@ -689,6 +689,13 @@ describe('the review table', () => {
       expect(dialog.textContent).toContain('Backups you already made still hold it');
       expect(backend.deleteDocument).not.toHaveBeenCalled();
     });
+    it('offers review beside the measurements, opening the same review screen for this document', () => {
+      const { store } = openDocument([proposed(), proposed({ id: 'b'.repeat(32) }), proposed({ id: 'c'.repeat(32), verification_status: 'verified' })]);
+      fireEvent.click(screen.getByRole('button', { name: 'Review measurements (2 to decide)' }));
+      expect(store.state.view).toBe('import');
+      expect(store.state.rvDoc).toBe('d'.repeat(32));
+      expect(store.state.returnTo).toEqual({ view: 'documents', y: 0 });
+    });
     it('does nothing on Cancel', () => {
       const { backend } = openDocument([proposed()]);
       offer();

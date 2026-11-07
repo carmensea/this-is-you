@@ -363,6 +363,14 @@ function DocumentDetail({ v }: { v: VM }) {
                 <h3 style={s.heading3}>Extracted measurements</h3>
                 <span style={s.muted12}>{v.detail.ddLinesCount}</span>
               </div>
+              {v.detail.ddCanReview && (
+                <button
+                  onClick={v.detail.ddReview}
+                  style={{ fontSize: 13, fontWeight: 500, background: C.ink, color: C.paper, padding: '7px 12px', marginTop: 12 }}
+                >
+                  {v.detail.ddMeasuresLabel}
+                </button>
+              )}
               <div style={{ overflowX: 'auto' }}>
                 <div style={{ minWidth: 560 }}>
                   {v.detail.ddExtracted.map((x, i5) => (
