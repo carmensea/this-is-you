@@ -104,12 +104,12 @@ describe('a real archive shows no fictional data', () => {
 
 describe('real documents on the Documents screen', () => {
   it('shows the original file, and claims nothing unknown about it', () => {
-    const { container } = mount();
+    const { container } = mount({ rvDoc: dto().id, dSel: dto().id });
     expect(screen.getAllByText('blood work 2024.pdf').length).toBeGreaterThan(0);
     expect(container.querySelector('[aria-label^="Original file"]')!.getAttribute('data-file')).toBe(dto().content_url);
     expect(container.textContent).toContain('b'.repeat(64));
-    expect(container.textContent).toContain('Date of serviceProposed: 11 March 2024 (low confidence, not verified)');
-    expect(container.textContent).toContain('ProviderNot recorded');
+    expect(container.textContent).toContain('Proposed, not verified · low confidence');
+    expect(container.textContent).toContain('Nothing found');
     expect(container.textContent).toContain('VerificationNot verified');
     expect(container.textContent).toContain('ReviewNot started');
     expect(container.textContent).toContain('ReadingText read');
@@ -121,10 +121,16 @@ describe('real documents on the Documents screen', () => {
     mount({}, [dto({ extraction_status: 'running' })]);
     expect(screen.queryByText('Review details')).toBeNull();
   });
-  it('offers review once it has been read', () => {
+  it('opens a document straight into its workspace, and back to the list with it still marked', () => {
     const { store } = mount();
-    fireEvent.click(screen.getByText('Review details'));
+    fireEvent.click(screen.getByRole('button', { name: /blood work 2024\.pdf/ }));
+    expect(store.state.view).toBe('documents');
     expect(store.state.rvDoc).toBe(dto().id);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(store.archive.documents[0].title);
+    expect(screen.queryByText('Review measurements')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '‹ Documents' }));
+    expect(store.state.rvDoc).toBeNull();
+    expect(screen.getByRole('button', { name: /blood work 2024\.pdf/ }).getAttribute('aria-current')).toBe('true');
   });
   it('points to Import when the archive is empty', () => {
     const { store } = mount({}, []);
@@ -192,14 +198,16 @@ describe('inferred details never pass as verified', () => {
     expect(container.textContent).toContain('3 proposed');
   });
   it('shows how each detail was decided', () => {
-    const { container } = mount({}, [decidedDto]);
-    expect(container.textContent).toContain('Imaging report, confirmed by you');
-    expect(container.textContent).toContain('3 November 2024, corrected by you (read as 11 March 2024)');
-    expect(container.textContent).toContain('Not stated in the document');
+    mount({ rvDoc: decidedDto.id, dSel: decidedDto.id, rvDetailsOpen: true }, [decidedDto]);
+    const details = screen.getByRole('region', { name: 'Document details' }).textContent!;
+    expect(details).toContain('ConfirmedImaging report');
+    expect(details).toContain('Corrected by you3 November 2024');
+    expect(details).toContain('Read from the document as 11 March 2024. Your correction is kept beside it.');
+    expect(details).toContain('Not stated in the document');
   });
   it('explains files it could not read', () => {
     for (const [status, text] of [['image_only', 'Image-only PDF'], ['encrypted', 'password protected'], ['too_complex', 'safety limits']] as const) {
-      const { container, unmount } = mount({}, [dto({ extraction_status: status, metadata: { document_type: field('missing'), service_date: field('missing'), provider: field('missing'), report_title: field('missing') } })]);
+      const { container, unmount } = mount({ rvDoc: dto().id, dSel: dto().id }, [dto({ extraction_status: status, metadata: { document_type: field('missing'), service_date: field('missing'), provider: field('missing'), report_title: field('missing') } })]);
       expect(container.textContent).toContain(text);
       expect(container.querySelector('[aria-label^="Original file"]')).not.toBeNull();
       unmount();
@@ -215,7 +223,7 @@ describe('inferred details never pass as verified', () => {
 describe('the review workflow', () => {
   const open = () => {
     const backend = backendWith();
-    const view = mount({ view: 'import', rvDoc: dto().id, rvStage: 'review' }, [dto()], backend);
+    const view = mount({ view: 'import', rvDoc: dto().id }, [dto()], backend);
     return { ...view, backend };
   };
   it('shows the proposal, its confidence, its source, and the real file', () => {
@@ -279,7 +287,7 @@ describe('the review workflow', () => {
   });
   it('folds the details away once all are decided, and shows them again on request', () => {
     const decided = { document_type: field('confirmed', 'lab'), service_date: field('confirmed', '2024-03-11'), provider: field('not_stated'), report_title: field('corrected', 'A Title') };
-    mount({ view: 'import', rvDoc: dto().id, rvStage: 'review' }, [dto({ metadata: decided })], backendWith());
+    mount({ view: 'import', rvDoc: dto().id }, [dto({ metadata: decided })], backendWith());
     const details = screen.getByRole('region', { name: 'Document details' });
     expect(details.textContent).toContain('All 4 decided, 1 corrected by you');
     expect(screen.queryByText('Correct')).toBeNull();
@@ -290,7 +298,7 @@ describe('the review workflow', () => {
   it('changes a decided detail as a new decision, never by erasing the old one', async () => {
     const backend = backendWith();
     const decided = { document_type: field('confirmed', 'lab'), service_date: field('confirmed', '2024-03-11'), provider: field('not_stated'), report_title: field('corrected', 'A Title') };
-    mount({ view: 'import', rvDoc: dto().id, rvStage: 'review', rvDetailsOpen: true }, [dto({ metadata: decided })], backend);
+    mount({ view: 'import', rvDoc: dto().id, rvDetailsOpen: true }, [dto({ metadata: decided })], backend);
     fireEvent.click(screen.getAllByRole('button', { name: 'Change' })[2]);
     fireEvent.click(screen.getByRole('button', { name: 'Correct' }));
     fireEvent.change(screen.getByLabelText('Corrected value'), { target: { value: 'Fictional Lab' } });
@@ -307,18 +315,19 @@ describe('the review workflow', () => {
     expect(document.activeElement?.textContent).toBe('Correct');
     expect(backend.decide).not.toHaveBeenCalled();
   });
-  it('cannot continue until every detail is decided', () => {
+  it('offers no way to finish until every detail is decided', () => {
     open();
-    expect((screen.getByText('Continue to confirmation') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Mark document as reviewed' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Finish this review' }).textContent).toContain('4 document details to decide');
   });
   it('completes the review through the service', async () => {
     const backend = backendWith();
     const all = field('confirmed', 'lab');
-    const view = mount({ view: 'import', rvDoc: dto().id, rvStage: 'review' }, [dto({ metadata: { document_type: all, service_date: field('confirmed', '2024-03-11'), provider: field('not_stated'), report_title: field('corrected', 'A Title') } })], backend);
-    fireEvent.click(screen.getByText('Continue to confirmation'));
-    await act(async () => { fireEvent.click(screen.getByText('Mark document as reviewed')); });
+    const view = mount({ view: 'import', rvDoc: dto().id }, [dto({ metadata: { document_type: all, service_date: field('confirmed', '2024-03-11'), provider: field('not_stated'), report_title: field('corrected', 'A Title') } })], backend);
+    // Inline at the end of the workspace, with nothing left to decide: no separate confirmation page.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Mark document as reviewed' })); });
     expect(backend.setReview).toHaveBeenCalledWith(dto().id, true);
-    expect(view.store.state.rvStage).toBe('done');
+    expect(view.store.state.rvDoc).toBe(dto().id);
   });
   it('lists read documents in the review queue, and not reviewed ones', () => {
     const { container, unmount } = mount({ view: 'import' });

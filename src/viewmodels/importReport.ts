@@ -137,7 +137,7 @@ export function importReportVM(store: AppStore) {
           !sending && (item.state === 'pending' || item.state === 'interrupted' || (item.state === 'rejected' && item.byte_size > 0) || (item.state === 'stored' && (reading === 'failed' || reading === 'too_complex'))),
         onRetry: () => imports.retryItem(item),
         documentId: item.document_id,
-        onView: () => store.go('documents', { dSel: item.document_id, dPage: 0, dHL: null }),
+        onView: () => item.document_id && store.openDocument(item.document_id),
       };
     }),
     shown: r.items.length,

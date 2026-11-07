@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { syntheticArchive as a } from '../data/syntheticArchive';
 import { advanceJobs, listOnly } from '../services/importService';
 import { AppStore } from '../state/store';
-import { documentsVM } from '../viewmodels/documents';
 import { importVM } from '../viewmodels/importQueue';
 import { reviewVM } from '../viewmodels/review';
 
@@ -43,17 +42,16 @@ describe('review', () => {
     const store = new AppStore(a);
     const before = importVM(store).impQueue.length;
     store.openReview(id);
-    expect(reviewVM(store)!.rvContinueDisabled).toBe(true);
+    expect(reviewVM(store)!.rvFinish.canFinish).toBe(false);
 
     reviewVM(store)!.rvLines.filter(l => !l.hasProblem).forEach(l => l.onAccept());
     reviewVM(store)!.rvFields.forEach(f => f.onConfirm());
     reviewVM(store)!.rvLines.filter(l => l.hasProblem).forEach(l => l.onReject());
     const v = reviewVM(store)!;
-    expect(v.rvContinueDisabled).toBe(false);
+    expect(v.rvFinish.canFinish).toBe(true);
 
-    v.rvContinue();
-    expect(store.state.rvStage).toBe('confirm');
-    reviewVM(store)!.rvAccept();
+    v.rvAccept(); // Inline, at the end of the same workspace: no separate confirmation page.
+    expect(reviewVM(store)!.rvFinish).toMatchObject({ reviewed: true, canFinish: false });
     expect(store.documentStatus(a.documentsById[id])).toBe('reviewed');
     expect(importVM(store).impQueue.length).toBe(before - 1);
   });
@@ -74,7 +72,8 @@ describe('document links', () => {
     const store = new AppStore(a, { view:'biomarkers' });
     store.openDrawDocument(3);
     expect(store.state.view).toBe('documents');
-    expect(documentsVM(store).detail!.ddTitle).toBe(a.documentsById['lab-3'].title);
+    expect(store.state.rvDoc).toBe('lab-3'); // Straight into the document's workspace.
+    expect(reviewVM(store)!.rvTitle).toBe(a.documentsById['lab-3'].title);
     store.goBack();
     expect(store.state.view).toBe('biomarkers');
   });

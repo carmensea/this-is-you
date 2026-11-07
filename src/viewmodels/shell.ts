@@ -23,7 +23,7 @@ export function shellVM(store: AppStore) {
     switchArchive: store.archive.kind === 'demo' ? openPersonalArchive : openDemoArchive,
     nav: VIEWS.map((k) => ({
       label: VIEW_LABELS[k],
-      onClick: () => store.go(k),
+      onClick: () => store.go(k, { rvDoc: null }), // A tab opens its own page, not a document left open there.
       border: k === v ? C.ink : 'transparent',
       color: k === v ? C.ink : C.ink2,
     })),

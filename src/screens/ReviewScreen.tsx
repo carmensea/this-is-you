@@ -8,10 +8,13 @@ import { C, MONO, SANS, SERIF } from '../theme';
 import { s } from '../components/styles';
 import { shellVM } from '../viewmodels/shell';
 import { reviewVM } from '../viewmodels/review';
+import { documentsVM } from '../viewmodels/documents';
+import { DocumentActions } from '../components/DocumentActions';
 
 type VM = ReturnType<typeof shellVM> & NonNullable<ReturnType<typeof reviewVM>>;
+type Fact = { k: string; v: string };
 
-function OriginalDocument({ v }: { v: VM }) {
+function OriginalDocument({ v, placeholder }: { v: VM; placeholder?: string }) {
   return (
     <section aria-label="Original document" className="review-original" style={{ flex: '1 1 460px', minWidth: 0, alignSelf: 'flex-start', paddingTop: 10 }}>
       <div
@@ -114,7 +117,7 @@ function OriginalDocument({ v }: { v: VM }) {
                     maxWidth: 340,
                   }}
                 >
-                  Original document text is preserved in the source file. Confirm the details on the right against it.
+                  {placeholder ?? 'Original document text is preserved in the source file. Confirm the details on the right against it.'}
                 </span>
               </div>
             )}
@@ -266,7 +269,7 @@ function DetailCell({ l, v }: { l: Field; v: VM }) {
   );
 }
 
-function DocumentDetails({ v }: { v: VM }) {
+function DocumentDetails({ v, facts }: { v: VM; facts: Fact[] }) {
   return (
     <section aria-label="Document details" style={{ marginTop: 14, border: `1px solid ${C.rule}` }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'baseline', padding: '8px 12px' }}>
@@ -284,6 +287,19 @@ function DocumentDetails({ v }: { v: VM }) {
           ))}
         </div>
       )}
+      {v.rvDetailsOpen && facts.length > 0 && (
+        <details style={{ borderTop: `1px solid ${C.rule2}`, padding: '8px 12px' }}>
+          <summary style={{ ...s.body125, cursor: 'pointer' }}>File information</summary>
+          <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: '10px 24px', margin: '10px 0 0' }}>
+            {facts.map((f) => (
+              <div key={f.k} style={s.minW0}>
+                <dt style={s.meta115}>{f.k}</dt>
+                <dd style={{ margin: '2px 0 0', fontSize: 13, overflowWrap: 'anywhere' }}>{f.v}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
     </section>
   );
 }
@@ -293,7 +309,7 @@ function Measurements({ v }: { v: VM }) {
     <>
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: '4px 16px', marginTop: 22, paddingBottom: 6, borderBottom: `1px solid ${C.ink}` }}>
         <h2 style={s.heading3}>Measurements</h2>
-        <span id="review-keys" style={s.monoNote}>{KEYS_HINT}</span>
+        {v.rvLines.length > 0 && <span id="review-keys" style={s.monoNote}>{KEYS_HINT}</span>}
       </div>
       {v.rvApprovedGroups.map((g) => (
         <p key={g.id} style={{ ...s.body125, margin: '8px 0 0' }}>
@@ -308,7 +324,7 @@ function Measurements({ v }: { v: VM }) {
           No measurements were recognized in this document. If it contains results, add them by hand.
         </p>
       )}
-      <ResultList lines={v.rvLines} onKey={v.rvKey} testNames={v.testNames} label="Measurements, in the order printed" keysId="review-keys" />
+      {v.rvLines.length > 0 && <ResultList lines={v.rvLines} onKey={v.rvKey} testNames={v.testNames} label="Measurements, in the order printed" keysId="review-keys" />}
       {v.rvReplaced.length > 0 && (
         <details style={{ borderTop: `1px solid ${C.rule2}`, padding: '10px 8px 0' }}>
           <summary style={{ ...s.body125, cursor: 'pointer' }}>
@@ -336,174 +352,89 @@ function Measurements({ v }: { v: VM }) {
   );
 }
 
-function ExtractedValues({ v }: { v: VM }) {
+function ExtractedValues({ v, facts }: { v: VM; facts: Fact[] }) {
   return (
     <section aria-label="Extracted values" style={{ flex: '1 1 560px', minWidth: 0 }}>
       <Progress v={v} />
-      <DocumentDetails v={v} />
-      {(v.rvHasLines || v.rvIsReal) && <Measurements v={v} />}
-      <div style={{ marginTop: 22, borderTop: `1px solid ${C.ink}`, paddingTop: 14, display: 'flex', flexWrap: 'wrap', gap: '12px 24px', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 13, color: C.ink2, maxWidth: 420 }}>{v.rvPendingText}</span>
-        {v.rvIdentity && (
-          <p role="note" style={{ margin: '12px 0 0', fontSize: 13, lineHeight: 1.5, color: C.rust, maxWidth: 720 }}>
-            {v.rvIdentity}
-          </p>
-        )}
-        <button onClick={v.rvContinue} disabled={v.rvContinueDisabled} style={{ background: v.rvContinueBg, color: v.rvContinueFg, padding: '9px 16px', fontSize: 13, fontWeight: 500 }}>
-          Continue to confirmation
-        </button>
-      </div>
+      <DocumentDetails v={v} facts={facts} />
+      {v.rvShowMeasurements && <Measurements v={v} />}
+      <Finish v={v} />
     </section>
   );
 }
 
-function Confirm({ v }: { v: VM }) {
+/** The end of the workspace. Marking as reviewed is offered only once every item has its own decision. */
+function Finish({ v }: { v: VM }) {
+  const f = v.rvFinish;
   return (
-    <section
-      aria-label="Confirm"
-      style={{ marginTop: 24, borderTop: `1px solid ${C.ink}`, paddingTop: 18, maxWidth: 820 }}
-    >
-      <h2 style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 28, margin: 0 }}>
-        {v.rvIsReal ? 'Finish this review' : 'Accept into the archive'}
+    <section aria-labelledby="finish-head" style={{ marginTop: 22, borderTop: `1px solid ${C.ink}`, paddingTop: 14 }}>
+      <h2 id="finish-head" style={{ ...s.heading3, fontSize: 19 }}>
+        {f.reviewed ? 'Reviewed' : 'Finish this review'}
       </h2>
-      <p style={{ fontSize: 15, lineHeight: 1.55, margin: '12px 0 0' }}>{v.rvSumAdd}</p>
-      {v.rvHasEdits && (
-        <div style={{ marginTop: 18 }}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: '0.09em',
-              textTransform: 'uppercase',
-              color: C.ink3,
-              borderBottom: `1px solid ${C.rule}`,
-              paddingBottom: 6,
-            }}
-          >
-            Your corrections
-          </div>
-          {v.rvEdits.map((x, i3) => (
-            <p
-              key={i3}
-              style={{ fontSize: 13, color: C.ink2, margin: 0, padding: '8px 0', borderBottom: `1px solid ${C.rule2}` }}
-            >
-              {x.text}
-            </p>
-          ))}
-        </div>
-      )}{' '}
-      {v.rvHasExcl && (
-        <div style={{ marginTop: 18 }}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: '0.09em',
-              textTransform: 'uppercase',
-              color: C.ink3,
-              borderBottom: `1px solid ${C.rule}`,
-              paddingBottom: 6,
-            }}
-          >
-            {v.rvIsReal ? 'Rejected, left out of your verified records' : 'Excluded, not added'}
-          </div>
-          {v.rvExcl.map((x, i4) => (
-            <p
-              key={i4}
-              style={{ fontSize: 13, color: C.ink2, margin: 0, padding: '8px 0', borderBottom: `1px solid ${C.rule2}` }}
-            >
-              {x.text}
-            </p>
-          ))}
-        </div>
+      <p style={{ ...s.body125, margin: '6px 0 0' }}>{f.counts.join(' · ')}</p>
+      <p style={{ fontSize: 13, lineHeight: 1.5, color: f.reviewed && !f.canFinish ? C.green : C.ink2, margin: '8px 0 0', maxWidth: 640 }}>{f.text}</p>
+      {v.rvIdentity && (
+        <p role="note" style={{ margin: '10px 0 0', fontSize: 13, lineHeight: 1.5, color: C.rust, maxWidth: 720 }}>
+          {v.rvIdentity}
+        </p>
       )}
-      <p style={{ fontSize: 13, color: C.ink2, margin: '18px 0 0', lineHeight: 1.55 }}>
-        The original file stays in the archive unchanged and remains linked to every accepted value. Extracted values
-        you corrected are kept in the review record, so the change can always be traced.
-      </p>
-      <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginTop: 20, flexWrap: 'wrap' }}>
-        <button
-          onClick={v.rvAccept}
-          style={{ background: C.ink, color: C.paper, padding: '10px 16px', fontSize: 13.5, fontWeight: 500 }}
-        >
+      {v.rvHasEdits && (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ ...s.body125, cursor: 'pointer' }}>Your corrections, kept in the history</summary>
+          {v.rvEdits.map((x, i) => (
+            <p key={i} style={{ fontSize: 13, color: C.ink2, margin: 0, padding: '8px 0', borderBottom: `1px solid ${C.rule2}` }}>
+              {x.text}
+            </p>
+          ))}
+        </details>
+      )}
+      {f.canFinish && (
+        <button onClick={v.rvAccept} style={{ marginTop: 14, background: C.ink, color: C.paper, padding: '9px 16px', fontSize: 13, fontWeight: 500 }}>
           {v.rvAcceptLabel}
         </button>
-        <button onClick={v.rvBackToReview} style={s.link13}>
-          Back to review
-        </button>
-      </div>
+      )}
     </section>
   );
 }
 
-function Accepted({ v }: { v: VM }) {
-  return (
-    <section
-      aria-label="Accepted"
-      style={{ marginTop: 24, borderTop: `1px solid ${C.green}`, paddingTop: 18, maxWidth: 820 }}
-    >
-      <div
-        style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.09em', textTransform: 'uppercase', color: C.green }}
-      >
-        Reviewed
-      </div>
-      <p style={{ fontFamily: SERIF, fontSize: 24, lineHeight: 1.35, margin: '8px 0 0' }}>{v.rvDoneText}</p>
-      <div style={{ display: 'flex', gap: 20, marginTop: 16, flexWrap: 'wrap' }}>
-        <button onClick={v.rvOpenDoc} style={s.link13}>
-          View document
-        </button>
-        <button onClick={v.rvNextQueue} style={s.link13}>
-          Back to review queue
-        </button>
-      </div>
-    </section>
-  );
-}
-
+/** One document: the original beside its details and measurements, each decided here, from Documents or the review queue. */
 export function ReviewScreen() {
   const store = useStore();
   const vm = reviewVM(store);
+  const doc = documentsVM(store).detail;
+  const heading = useRef<HTMLHeadingElement>(null);
+  const docId = store.state.rvDoc;
+  // Opening a document moves focus to its title, so a screen reader starts at the document, not the old list.
+  useEffect(() => heading.current?.focus(), [docId]);
   if (!vm) return null;
   const v: VM = { ...shellVM(store), ...vm };
   return (
     <main style={{ maxWidth: 1480, margin: '0 auto', padding: '24px var(--gutter) 64px' }}>
       <button onClick={v.rvBack} style={s.link13}>
-        ‹ Review queue
+        ‹ {v.rvBackLabel}
       </button>
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          letterSpacing: '0.09em',
-          textTransform: 'uppercase',
-          color: C.ink3,
-          marginTop: 18,
-        }}
-      >
-        Reviewing extracted values
-      </div>
       <h1
+        ref={heading}
+        tabIndex={-1}
         style={{
+          outline: 'none',
           fontFamily: SERIF,
           fontWeight: 400,
           fontSize: 40,
           lineHeight: 1.1,
           letterSpacing: '-0.015em',
-          margin: '8px 0 6px',
+          margin: '14px 0 6px',
+          overflowWrap: 'anywhere',
         }}
       >
         {v.rvTitle}
       </h1>
       <div style={s.body13}>{v.rvMeta}</div>
-      {v.rvIsReview && (
-        <>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '24px 36px', marginTop: 12, alignItems: 'flex-start' }}>
-            <OriginalDocument v={v} />
-            <ExtractedValues v={v} />
-          </div>
-        </>
-      )}{' '}
-      {v.rvIsConfirm && <Confirm v={v} />} {v.rvIsDone && <Accepted v={v} />}
+      {doc && <DocumentActions d={doc} />}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '24px 36px', marginTop: 12, alignItems: 'flex-start' }}>
+        <OriginalDocument v={v} placeholder={doc?.ddPlaceholder} />
+        <ExtractedValues v={v} facts={doc?.ddFileFacts ?? []} />
+      </div>
     </main>
   );
 }

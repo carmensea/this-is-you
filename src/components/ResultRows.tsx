@@ -152,6 +152,11 @@ function Row({ l, testNames, bind }: { l: Line; testNames: string[]; bind: (key:
                 {l.isRejected ? 'Restore' : 'Undo acceptance'}
               </button>
             )}
+            {l.onChart && (
+              <button onClick={l.onChart} aria-label={`Chart ${l.measure}`} style={{ fontSize: 12.5, color: C.green, borderBottom: `1px solid ${C.green}` }}>
+                Chart
+              </button>
+            )}
             <span style={s.body125}>{l.statusText}</span>
           </div>
           <details style={{ marginTop: 6, fontSize: 12, color: C.ink2 }}>

@@ -152,7 +152,7 @@ export function importVM(store: AppStore) {
         p1: stored ? C.ink : 'transparent',
         p2: f.done && o.read ? C.ink : !f.done && f.pct >= 60 ? C.ink : 'transparent',
         documentId: f.documentId,
-        onView: () => store.go('documents', { dSel: f.documentId ?? null, dPage: 0, dHL: null }),
+        onView: () => (f.documentId ? store.openDocument(f.documentId) : store.go('documents')),
         p3: f.done && o.ext ? C.ink : 'transparent',
         p4: 'transparent',
       };

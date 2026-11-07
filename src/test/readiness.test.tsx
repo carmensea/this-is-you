@@ -413,6 +413,8 @@ describe('identity flags', () => {
   it('marks a document for a person to check, and keeps every way to open and review it', () => {
     const { container, store } = mount(backendWith(), { view: 'documents', dSel: 'd0' }, [dto({ identity: mismatch })]);
     expect(container.textContent).toContain('Check whose document this is');
+    fireEvent.click(screen.getByRole('button', { name: /Check whose document this is/ }));
+    expect(store.state.rvDoc).toBe('d0');
     expect(container.textContent).toContain('Morgan Otherperson');
     expect(store.archive.documents).toHaveLength(1);
     expect(store.archive.documents[0].review!.verification).toBe('unverified');

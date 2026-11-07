@@ -108,8 +108,6 @@ export interface AppState {
   dDesc: boolean;
   dSnapOnly: boolean;
   dSel: string | null;
-  dPage: number;
-  dHL: string | null;
   // Import and review
   imp: ImportJob[];
   dz: boolean;
@@ -118,7 +116,6 @@ export interface AppState {
   rvLine: string | null;
   rvEdit: string | null;
   rvDraft: ReviewDraft;
-  rvStage: 'review' | 'confirm' | 'done';
   /** The measurement whose actions and source are shown. rvLine is the one selected. */
   rvOpen: string | null;
   /** Document details shown or hidden by the person. Null follows whether any is undecided. */
@@ -143,8 +140,8 @@ export interface AppState {
   rvPdfTarget: PdfTarget | null;
   /** The add-a-measurement form on the review screen. */
   rvAdding: boolean;
-  /** Which page of a document's original the Documents screen should show. */
-  dSource: { id: string; page: number } | null;
+  /** Where the Documents list was scrolled when a document was opened, to return there. */
+  dListY: number;
   /** What the last "Read again" did, for the document it was asked for. */
   dReread: { id: string; ok: boolean; text: string } | null;
   /** The add-a-result form on the Import screen. */
@@ -193,8 +190,6 @@ export const initialState: AppState = {
   dDesc: true,
   dSnapOnly: false,
   dSel: null,
-  dPage: 0,
-  dHL: null,
   imp: [],
   report: emptyReport,
   archiveStale: false,
@@ -210,14 +205,13 @@ export const initialState: AppState = {
   rvLine: null,
   rvEdit: null,
   rvDraft: {},
-  rvStage: 'review',
   rvOpen: null,
   rvDetailsOpen: null,
   rvError: null,
   rvGroupError: null,
   rvPdfTarget: null,
   rvAdding: false,
-  dSource: null,
+  dListY: 0,
   dReread: null,
   manualOpen: false,
   manualEdit: null,
@@ -305,14 +299,20 @@ export class AppStore {
   };
 
   // Source documents
-  openDocument = (id: string, highlight: string | null = null) => {
+  /** Opens a document's workspace: the original beside its details and measurements, where each is decided. */
+  openDocument = (id: string) => {
     const v = this.state.view;
-    this.go('documents', {
+    this.openWorkspace(id, 'documents', {
       dSel: id,
-      dPage: 0,
-      dHL: highlight,
+      dListY: v === 'documents' ? scrollY() : 0,
       returnTo: v !== 'documents' ? { view: v, y: scrollY() } : this.state.returnTo,
     });
+  };
+  /** Back to the list, where it was scrolled, with this document still marked. */
+  closeDocument = () => {
+    const y = this.state.dListY;
+    this.setState({ rvDoc: null, rvEdit: null, rvOpen: null });
+    setTimeout(() => scrollTop(y), 40);
   };
   openEventDocument = (e: HealthEvent) => {
     if (e.documentId) this.openDocument(e.documentId);
@@ -427,10 +427,11 @@ export class AppStore {
       return { rv: { ...st.rv, [id]: { ...c, [grp]: { ...c[grp], [key]: { ...c[grp][key], ...patch } } } } };
     });
   };
-  openReview = (id: string, extra: Partial<AppState> = {}) =>
-    this.go('import', {
+  openReview = (id: string, extra: Partial<AppState> = {}) => this.openWorkspace(id, 'import', extra);
+  private openWorkspace = (id: string, view: View, extra: Partial<AppState>) =>
+    this.go(view, {
       rvDoc: id,
-      rvStage: 'review',
+      dSel: id,
       rvLine: null,
       rvEdit: null,
       rvOpen: null,
@@ -587,10 +588,7 @@ export class AppStore {
     this.saving((backend) => backend.decide(id, field, decision));
 
   completeReview = async (id: string) => {
-    if (await this.saving((backend) => backend.setReview(id, true))) {
-      this.setState({ rvStage: 'done' });
-      window.scrollTo(0, 0);
-    }
+    await this.saving((backend) => backend.setReview(id, true));
   };
 
   /** One document, at the person's request. The result compares what the archive held before with what it holds after. */
@@ -677,7 +675,7 @@ export class AppStore {
 
   /** Removes a document for good. Resolves to an error for the dialog to show, or null. */
   deleteDocument = async (id: string) => {
-    const problem = await this.attempt((backend) => backend.deleteDocument(id), { dSel: null, dSource: null });
+    const problem = await this.attempt((backend) => backend.deleteDocument(id), { dSel: null, rvDoc: null });
     if (!problem) await this.imports.refresh();
     return problem;
   };

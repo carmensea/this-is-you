@@ -55,7 +55,7 @@ export function App() {
       {!blocked && view === 'overview' && <OverviewScreen />}
       {!blocked && view === 'biomarkers' && <BiomarkersScreen />}
       {!blocked && view === 'history' && <HistoryScreen />}
-      {view === 'documents' && <DocumentsScreen />}
+      {view === 'documents' && (rvDoc ? <ReviewScreen /> : <DocumentsScreen />)}
       {view === 'import' && (rvDoc ? <ReviewScreen /> : <ImportScreen />)}
       {!blocked && view === 'compare' && <CompareScreen />}
       {view === 'sources' && <SourcesScreen />}

@@ -147,6 +147,15 @@ export type ResultInput = {
 
 /** Rows of results to decide one at a time, for a document or a provider. With observations, every decision goes to the
  *  service and its history; without them (the demo), it stays in this browser. */
+/** An accepted result's place in Biomarkers, when it has one: found by its record, or in the demo by its marker. */
+function chartLink(store: AppStore, key: string, o: LabObservation | undefined, documentId: string) {
+  const draw = store.archive.documentsById[documentId]?.draw;
+  const marker = store.archive.markers.find((mk) => (o ? mk.results.some((r) => r.observationId === o.id) : mk.key === key));
+  const result = marker?.results.find((r) => (o ? r.observationId === o.id : r.i === draw));
+  if (!marker || !result) return null;
+  return () => store.goFrom('biomarkers', { marker: marker.key, sel: result.i, bxUnit: result.unit, bxCmp: null });
+}
+
 export function resultLines(store: AppStore, L: ResultInput[], observations: LabObservation[] | undefined, demoId: string) {
   const s = store.state;
   const dr = s.rvDraft;
@@ -238,6 +247,7 @@ export function resultLines(store: AppStore, L: ResultInput[], observations: Lab
       isEdited: l.edited,
       groupNote: groupDay ? `Accepted as part of a group on ${groupDay}.` : '',
       primary,
+      onChart: isAccepted ? chartLink(store, l.key, o, demoId) : null,
       canAcceptAsRead: isPending && kind !== 'missing' && needsLook && !isEditing,
       canCorrect: !isEditing && !isRejected,
       correctLabel: kind === 'missing' ? 'Enter value' : 'Correct',
@@ -478,13 +488,14 @@ export function reviewVM(store: AppStore) {
   };
 
   const out = {
-    rvIsReview: s.rvStage === 'review',
-    rvIsConfirm: s.rvStage === 'confirm',
-    rvIsDone: s.rvStage === 'done',
+    rvBackLabel: s.view === 'documents' ? 'Documents' : 'Review queue',
     rvBack: () => {
+      if (s.view === 'documents') return store.closeDocument();
       store.setState({ rvDoc: null, rvEdit: null });
       window.scrollTo(0, 0);
     },
+    // While a file is being read there is nothing to decide yet. Once read, an empty list can still take one typed in.
+    rvShowMeasurements: real ? !['pending', 'running'].includes(real.extraction) : L.length > 0,
     rvIsReal: !!real,
     // What an earlier reading proposed and a newer one replaced. History only: restoring puts it back to decide.
     rvReplaced: (real?.observations ?? [])
@@ -496,7 +507,6 @@ export function reviewVM(store: AppStore) {
       })),
     rvContentUrl: d.contentUrl ?? null,
     rvPdfTarget: s.rvPdfTarget,
-    rvFileUrl: d.contentUrl ?? null,
     rvError: real ? s.rvError : null,
     rvGroupError: s.rvGroupError,
     rvIdentity: real?.identity?.status === 'possible_mismatch' ? real.identity.reason : null,
@@ -557,7 +567,7 @@ export function reviewVM(store: AppStore) {
     rvDetailsDone: !fieldsLeft,
     rvDetailsLine: F.map((l) => l.value).join(' · '),
     rvFields: fields,
-    rvNoneRecognized: !!real && !L.length,
+    rvNoneRecognized: !!real && !L.length && real.extraction === 'extracted',
     rvAdding: s.rvAdding,
     rvToggleAdd: () => store.setState((st) => ({ rvAdding: !st.rvAdding })),
     rvAddMeasurement: (fields: ObservationFields) => store.createObservation(fields, id, false),
@@ -570,26 +580,33 @@ export function reviewVM(store: AppStore) {
       text: `${countAndDate(rows)} ${rows.length === 1 ? 'was' : 'were'} approved as a group on ${fShort(rows[0].revisions[rows[0].revisions.length - 1].occurred_at.slice(0, 10))}.`,
       onUndo: () => void store.undoGroup(groupId),
     })),
-    rvPendingText: pending
-      ? plural(pending, 'item') + ' still to decide. Each one needs your own decision.'
-      : real
-        ? 'Every detail is decided, and your decisions are saved. The next step marks the review as complete.'
-        : 'Everything is resolved. Nothing is added to the archive until you accept on the next step.',
-    rvContinueDisabled: pending > 0,
-    rvContinueBg: pending ? C.sunk : C.ink,
-    rvContinueFg: pending ? C.ink3 : C.paper,
-    rvContinue: () => {
-      if (!pending) {
-        store.setState({ rvStage: 'confirm' });
-        window.scrollTo(0, 0);
-      }
-    },
-    rvBackToReview: () => store.setState({ rvStage: 'review' }),
-    rvSumAdd: real
-      ? `${plural(conf, 'measurement')} accepted and ${exc} rejected. Accepted results are linked to this document. Nothing is changed in the original file.`
-      : L.length
-        ? plural(conf, 'measurement') + ' will be added to the archive as reviewed, each linked to this document.'
-        : 'The document details will be marked as reviewed.',
+    // The end of the workspace: what was decided, and the one action that marks the document as reviewed.
+    rvFinish: (() => {
+      const corrected = L.filter((l) => l.edited && l.status === 'confirmed').length;
+      const reviewed = real ? real.review === 'completed' : !!s.accepted?.[id];
+      return {
+        counts: [
+          L.length ? `${conf - corrected} accepted` : '',
+          L.length ? `${corrected} corrected` : '',
+          L.length ? `${exc} rejected` : '',
+          L.length ? `${linesLeft} ${linesLeft === 1 ? 'measurement' : 'measurements'} to decide` : '',
+          `${fieldsLeft} document ${fieldsLeft === 1 ? 'detail' : 'details'} to decide`,
+        ].filter(Boolean),
+        canFinish: pending === 0 && !reviewed,
+        reviewed,
+        text: reviewed
+          ? pending
+            ? `Marked as reviewed earlier. ${plural(pending, 'item')} reopened since then ${pending === 1 ? 'needs' : 'need'} your decision before it can be marked again.`
+            : 'Marked as reviewed. Everything here stays open to look at. Any change you make is saved as its own decision and kept in the history.'
+          : pending
+            ? `${plural(pending, 'item')} still to decide. Each one needs your own decision before the document can be marked as reviewed.`
+            : real
+              ? `Every item is decided and saved. ${plural(conf, 'measurement')} accepted are linked to this document. Nothing is changed in the original file.`
+              : L.length
+                ? plural(conf, 'measurement') + ' will be added to the archive as reviewed, each linked to this document.'
+                : 'The document details will be marked as reviewed.',
+      };
+    })(),
     rvEdits: all
       .filter((l) => l.edited)
       .map((l) => ({
@@ -608,10 +625,6 @@ export function reviewVM(store: AppStore) {
             '.',
       })),
     rvHasEdits: edt > 0,
-    rvExcl: L.filter((l) => l.status === 'excluded').map((l) => ({
-      text: l.measure + ': ' + l.orig.value + ' ' + l.orig.unit,
-    })),
-    rvHasExcl: exc > 0,
     rvAcceptLabel: real
       ? 'Mark document as reviewed'
       : L.length
@@ -622,16 +635,7 @@ export function reviewVM(store: AppStore) {
         void store.completeReview(id);
         return;
       }
-      store.setState((st) => ({ accepted: Object.assign({}, st.accepted, { [id]: true }), rvStage: 'done' }));
-      window.scrollTo(0, 0);
-    },
-    rvDoneText: L.length
-      ? plural(conf, 'value') + ' from ' + d.title.toLowerCase() + ' are now marked as reviewed.'
-      : 'The document details are now marked as reviewed.',
-    rvOpenDoc: () => store.openDocument(id),
-    rvNextQueue: () => {
-      store.setState({ rvDoc: null, rvStage: 'review' });
-      window.scrollTo(0, 0);
+      store.setState((st) => ({ accepted: Object.assign({}, st.accepted, { [id]: true }) }));
     },
   };
   return out;

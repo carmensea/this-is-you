@@ -1,42 +1,18 @@
 import type { InputChange } from './events';
 import { fLong, fShort } from '../domain/dates';
-import { fmtR, plural, rangeOnly } from '../domain/format';
-import { DCATL, DCATS, STATUS, TYPE_LABEL } from '../domain/vocabulary';
+import { plural } from '../domain/format';
+import { DCATL, DCATS, STATUS } from '../domain/vocabulary';
 import {
   EXTRACTION_LABEL,
-  FIELD_LABEL,
-  FIELD_ORDER,
   REVIEW_LABEL,
   VERIFICATION_LABEL,
-  canReview,
-  describeField,
   isReading,
   proposalCount,
   typeLabel,
 } from '../domain/documentReview';
 import { C } from '../theme';
 import type { AppStore } from '../state/store';
-import type { ArchiveDocument, DocumentStatus, LabObservation } from '../domain/types';
-
-function realExtractedRow(store: AppStore, documentId: string, o: LabObservation) {
-  const marker = store.archive.markers.find((mk) => mk.results.some((r) => r.observationId === o.id));
-  const result = marker?.results.find((r) => r.observationId === o.id);
-  return {
-    name: o.reported_name,
-    value: o.value_text + (o.unit ? ' ' + o.unit : ''),
-    ref: o.reference_text ?? '',
-    flag: o.flag ?? '',
-    // Only confirmed results reach this table. Undecided, rejected and replaced ones stay in the review.
-    status: o.origin === 'manual' ? 'User-entered' : o.edited ? 'Corrected' : 'Accepted',
-    statusColor: C.green,
-    bg: 'transparent',
-    onLocate: () => o.source_page && store.setState({ dSource: { id: documentId, page: o.source_page } }),
-    onChart: () => {
-      if (marker && result)
-        store.goFrom('biomarkers', { marker: marker.key, sel: result.i, bxUnit: result.unit, bxCmp: null });
-    },
-  };
-}
+import type { ArchiveDocument, DocumentStatus } from '../domain/types';
 
 const REVIEW_STATUS_NOTE: Record<DocumentStatus, string> = {
   uploaded: 'Original stored.',
@@ -82,7 +58,8 @@ export function documentsVM(store: AppStore) {
   const list = base.filter((d) => tOn(d.cat) && sOn(st(d)));
   const desc = s.dDesc !== false;
   const sorted = list.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) * (desc ? -1 : 1));
-  const sel = (s.dSel ? archive.documentsById[s.dSel] : undefined) || sorted[0] || null;
+  // The open document, or the one last opened, which the list keeps marked.
+  const sel = (s.dSel ? archive.documentsById[s.dSel] : undefined) || null;
   const sq = (k: DocumentStatus) => {
     const n = STATUS[k].n,
       un = k === 'unsupported';
@@ -137,7 +114,7 @@ export function documentsVM(store: AppStore) {
         current: !!(sel && sel.id === d.id),
         snapTag: inRec(d) ? '' : 'Added after snapshot',
         titleColor: inRec(d) ? C.ink : C.ink2,
-        onClick: () => store.setState({ dSel: d.id, dPage: 0, dHL: null }),
+        onClick: () => store.openDocument(d.id),
       }),
     );
   });
@@ -192,8 +169,7 @@ export function documentsVM(store: AppStore) {
   };
   if (!sel) return { ...out, detail: null };
   const k = st(sel),
-    meta = STATUS[k],
-    f = archive.lowConfidence[sel.id] || {};
+    meta = STATUS[k];
   const lines =
     sel.draw != null
       ? archive.markers.flatMap((mk) => {
@@ -201,35 +177,15 @@ export function documentsVM(store: AppStore) {
           return r ? [{ mk, r }] : [];
         })
       : [];
-  const pages = Math.max(1, lines.length ? Math.ceil(lines.length / 8) : sel.pages || 1);
-  const page = Math.min(s.dPage || 0, pages - 1);
-  const goToPage = (next: number) =>
-    store.setState({ dPage: next, ...(sel.contentUrl ? { dSource: { id: sel.id, page: next + 1 } } : {}) });
   const ev = sel.ev ? archive.events.find((e) => e.id === sel.ev) : null;
   const known = inRec(sel);
-  const lineStatus = (mkKey: string): [string, string] =>
-    k === 'reviewed'
-      ? ['Reviewed', C.green]
-      : k === 'parsed'
-        ? f[mkKey]
-          ? ['Low confidence', C.rust]
-          : ['Parsed', '#8A5A1F']
-        : ['Not extracted', C.ink3];
-  const preview = sel.draw != null && !sel.dup;
   const verifiedHere = sel.review?.observations.filter((o) => o.verification_status === 'verified').length ?? 0;
-  // Replaced proposals are history. They are counted apart and listed only in the review.
-  const real = sel.review?.observations.filter((o) => o.verification_status !== 'superseded');
-  const count = (status: LabObservation['verification_status']) =>
-    sel.review?.observations.filter((o) => o.verification_status === status).length ?? 0;
-  const [open, confirmed, rejected, replaced] = [count('proposed'), count('verified'), count('rejected'), count('superseded')];
   const reread = s.dReread?.id === sel.id ? s.dReread : null;
   return {
     ...out,
     detail: {
       ...sq(k),
       ddCat: DCATL[sel.cat],
-      ddTitle: sel.title,
-      ddFile: sel.file,
       ddStatusLabel: meta.label,
       ddStatusColor: meta.color,
       ddStatusDesc: sel.review ? VERIFICATION_LABEL[sel.review.verification] + '. ' + REVIEW_STATUS_NOTE[k] : meta.desc,
@@ -237,16 +193,8 @@ export function documentsVM(store: AppStore) {
         ? 'In the record by the snapshot date, ' + fShort(cur) + '.'
         : 'Not yet in the record on the snapshot date, ' + fShort(cur) + '. Documented ' + fShort(sel.documented) + '.',
       ddKnownColor: known ? C.ink2 : C.rust,
-      ddContentUrl: sel.contentUrl
-        ? sel.contentUrl + (s.dSource?.id === sel.id ? `#page=${s.dSource.page}` : '')
-        : null,
       ddHasNote: !!sel.note,
       ddNote: sel.note || '',
-      ddReviewLabel: sel.review
-        ? sel.review.review === 'completed'
-          ? 'Change reviewed details'
-          : 'Review details'
-        : 'Review extracted values',
       ddCanDelete: !!sel.review,
       ddDeleteName: sel.file,
       ddDeleteWhat: sel.review
@@ -263,9 +211,9 @@ export function documentsVM(store: AppStore) {
         sel.review?.extraction === 'failed' || sel.review?.extraction === 'too_complex' ? 'Try reading again' : 'Read again with the current reader',
       ddReread: () => void store.readAgain(sel.id),
       ddRereadResult: reread,
-      ddFields: sel.review
+      // What the file is, apart from what a person decides about it. Shown folded away in the workspace.
+      ddFileFacts: sel.review
         ? [
-            ...FIELD_ORDER.map((key) => ({ k: FIELD_LABEL[key], v: describeField(key, sel.review!.fields[key]) })),
             { k: 'Reading', v: EXTRACTION_LABEL[sel.review.extraction] },
             { k: 'Review', v: REVIEW_LABEL[sel.review.review] },
             { k: 'Verification', v: VERIFICATION_LABEL[sel.review.verification] },
@@ -283,13 +231,6 @@ export function documentsVM(store: AppStore) {
             { k: 'Checksum, SHA-256', v: sel.hash },
             { k: 'Original file', v: 'Stored unchanged since import' },
             { k: 'Original filename', v: sel.file },
-            {
-              k: 'Measurements',
-              v:
-                real && real.length
-                  ? `${real.filter((o) => o.verification_status === 'verified').length} accepted of ${real.length}`
-                  : 'None recognized',
-            },
           ]
         : [
             { k: 'Document type', v: DCATL[sel.cat] },
@@ -338,17 +279,11 @@ export function documentsVM(store: AppStore) {
         window.scrollTo(0, 0);
       },
       ddSnap: () => store.setCur(mode === 'known' ? sel.documented : sel.date),
-      ddCanReview: sel.review ? canReview(sel) : k === 'parsed',
-      ddReview: () => store.openReview(sel.id, { returnTo: { view: 'documents', y: 0 } }),
       ddHasDup: !!sel.dup || !!sel.review?.possibleDuplicates.length,
-      ddOpenDup: () =>
-        store.setState({ dSel: sel.dup ?? sel.review?.possibleDuplicates[0] ?? null, dPage: 0, dHL: null }),
-      ddMultiPage: pages > 1,
-      ddPageText: 'Page ' + (page + 1) + ' of ' + pages,
-      ddPrev: () => goToPage(Math.max(0, page - 1)),
-      ddNext: () => goToPage(Math.min(pages - 1, page + 1)),
-      ddIsLab: preview,
-      ddNoPreview: !preview,
+      ddOpenDup: () => {
+        const other = sel.dup ?? sel.review?.possibleDuplicates[0];
+        if (other) store.openDocument(other);
+      },
       ddPlaceholder:
         sel.status === 'unsupported'
           ? 'No preview: ' +
@@ -361,68 +296,6 @@ export function documentsVM(store: AppStore) {
               : sel.ext === 'zip'
                 ? 'Archive file. Its contents have not been read yet.'
                 : 'Original document text is preserved in the source file. This prototype does not reproduce clinical narrative.',
-      ddHead: sel.source,
-      ddSub:
-        (sel.cat === 'lab'
-          ? 'Collected ' + fShort(sel.date) + ' · Reported ' + fShort(sel.documented)
-          : DCATL[sel.cat] + ' · ' + (sel.dateLabel || fShort(sel.date))) + (sel.who ? ' · ' + sel.who : ''),
-      ddLines: lines.slice(page * 8, page * 8 + 8).map(({ mk, r }) => ({
-        name: mk.name,
-        value: fmtR(r),
-        flag: r.flag,
-        ref: rangeOnly(r),
-        unit: r.unit,
-        bg: s.dHL === mk.key ? C.greenT : 'transparent',
-        outline: s.dHL === mk.key ? '1px solid ' + C.green : '1px solid transparent',
-        onClick: () => store.setState({ dHL: mk.key }),
-      })),
-      ddHasLines: real ? real.length > 0 : lines.length > 0 && !sel.dup,
-      ddLinesHead: real ? (open ? 'Measurements' : 'Confirmed measurements') : 'Extracted measurements',
-      ddToReview: open > 0,
-      ddMeasuresLabel: open ? 'Review measurements' : 'Change decisions or see the review history',
-      ddLinesCount: real
-        ? [
-            plural(real.length, 'measurement'),
-            confirmed || !open ? `${confirmed} confirmed` : '',
-            rejected ? `${rejected} rejected` : '',
-            open ? `${open} to review` : '',
-            replaced ? `${replaced} replaced by a newer reading` : '',
-          ]
-            .filter(Boolean)
-            .join(' · ')
-        : plural(lines.length, 'measurement') + ' extracted from this report',
-      ddExtracted: real
-        ? real
-            .filter((o) => o.verification_status === 'verified')
-            // In the order printed, as the review shows them.
-            .sort((a, b) => (a.source_page ?? Infinity) - (b.source_page ?? Infinity) || (a.source_line ?? Infinity) - (b.source_line ?? Infinity))
-            .map((o) => realExtractedRow(store, sel.id, o))
-        : lines.map(({ mk, r }, idx) => {
-            const ls = lineStatus(mk.key);
-            return {
-              name: mk.name,
-              value: fmtR(r) + ' ' + r.unit,
-              ref: rangeOnly(r),
-              flag: r.flag,
-              status: ls[0],
-              statusColor: ls[1],
-              bg: s.dHL === mk.key ? C.greenT : 'transparent',
-              onLocate: () => store.setState({ dHL: mk.key, dPage: Math.floor(idx / 8) }),
-              onChart: () => {
-                store.setState({
-                  view: 'biomarkers',
-                  marker: mk.key,
-                  sel: r.i,
-                  bxUnit: r.unit,
-                  bxCmp: null,
-                  returnTo: { view: 'documents', y: window.scrollY },
-                });
-                window.scrollTo(0, 0);
-              },
-            };
-          }),
-      ddHasRecord: !lines.length && !!ev,
-      ddRecordText: ev ? TYPE_LABEL[ev.type] + ' in Medical history: ' + ev.title + ', ' + fShort(ev.date) : '',
     },
   };
 }
