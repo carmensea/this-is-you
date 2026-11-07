@@ -12,6 +12,8 @@ import re
 import time
 from urllib.parse import parse_qs, urlsplit
 
+import httpcore
+import httpcore._backends.sync
 import httpx
 import pytest
 from cryptography.hazmat.primitives import hashes
@@ -365,9 +367,65 @@ def test_a_provider_name_that_leads_to_this_machine_or_its_network_is_refused(mo
     monkeypatch.setattr(client_module.socket, "getaddrinfo", lambda *a, **k: [(None, None, None, "", (a_, 443)) for a_ in addresses])
     if refused:
         with pytest.raises(RefusedAddress):
-            client_module.refuse_private_host("fhir.example.com")
+            client_module.public_addresses("fhir.example.com")
     else:
-        client_module.refuse_private_host("fhir.example.com")
+        assert client_module.public_addresses("fhir.example.com") == addresses
+
+
+class _Network:
+    """Stands in for DNS and TCP: answers each lookup from a list, records every connection, and connects nowhere."""
+
+    def __init__(self, monkeypatch, *answers):
+        import socket
+        self.answers, self.lookups, self.connected, self.tls = list(answers), [], [], []
+        # A real TCP socket on this machine stands in for the provider, so no packet leaves it.
+        self._listener = socket.create_server(("127.0.0.1", 0))
+        monkeypatch.setattr(socket, "getaddrinfo", self.lookup)
+        monkeypatch.setattr(socket, "create_connection", self.connect)
+        monkeypatch.setattr(httpcore._backends.sync.SyncStream, "start_tls", self.start_tls)
+
+    def lookup(self, host, port, *a, **k):
+        self.lookups.append(host)
+        answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        return [(None, None, None, "", (answer, port))]
+
+    def connect(self, address, *a, **k):
+        self.connected.append(address[0])
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(self._listener.getsockname())  # By address: the patched name lookup is never used here.
+        return sock
+
+    def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+        self.tls.append((server_hostname, ssl_context.check_hostname, ssl_context.verify_mode))
+        raise httpcore.ConnectError("stopped here: no network in tests")
+
+
+def test_a_provider_name_whose_answer_changes_never_reaches_a_private_address(monkeypatch):
+    """DNS rebinding: public for the check, then private. Each connection uses the one lookup it checked."""
+    net = _Network(monkeypatch, "93.184.215.14", "127.0.0.1")
+    client = ProviderClient(SANDBOX, sleep=lambda _: None)
+    with pytest.raises(RefusedAddress):
+        client.get_public(SANDBOX.fhir_base + "/metadata")  # The retry looks the name up again, gets 127.0.0.1, and stops.
+    assert net.connected == ["93.184.215.14"]
+    assert "127.0.0.1" not in net.connected
+
+
+def test_the_connection_goes_to_the_checked_address_and_the_certificate_must_match_the_name(monkeypatch):
+    net = _Network(monkeypatch, "93.184.215.14")
+    client = ProviderClient(SANDBOX, sleep=lambda _: None)
+    with pytest.raises(service.ProviderError):
+        client.get_public(SANDBOX.fhir_base + "/metadata")
+    assert set(net.connected) == {"93.184.215.14"} and len(net.lookups) == len(net.connected)  # One lookup per connection.
+    import ssl
+    assert set(net.tls) == {(SANDBOX.host, True, ssl.CERT_REQUIRED)}
+
+
+def test_a_private_answer_is_refused_before_any_connection(monkeypatch):
+    net = _Network(monkeypatch, "10.0.0.5")
+    with pytest.raises(RefusedAddress):
+        ProviderClient(SANDBOX, sleep=lambda _: None).post_form(SANDBOX.fhir_base.split("/api")[0] + "/oauth2/token", {"a": "b"})
+    assert net.connected == []
 
 
 def test_the_printed_key_set_verifies_the_signed_assertion(data_dir):

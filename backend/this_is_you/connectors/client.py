@@ -3,6 +3,9 @@
 - HTTPS only, to the provider's own host, on the default port, with no user name in the address.
 - A token is only ever sent to an address under the provider's FHIR base it was issued for.
 - Redirects are never followed, so a server cannot send the request, or its token, somewhere else.
+- The provider's name is looked up once per connection, every address it gives must be on the public internet, and the
+  connection goes to an address that passed that check. A name that changes its answer (DNS rebinding) cannot then reach
+  this machine or its network. The certificate is still checked against the provider's name.
 - Answers are size-limited, and waits and retries are bounded.
 - Nothing from an answer is logged: only the record type, status and size.
 """
@@ -15,6 +18,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+import httpcore
 import httpx
 
 from .providers import Provider
@@ -78,32 +82,55 @@ def check_address(provider: Provider, url: str, *, under_base: bool) -> str:
     return url
 
 
-def refuse_private_host(host: str) -> None:
-    """A provider's name must lead to the internet, never to this machine or its network, where a credential could be caught.
-    shortcut: checked before each request, and the connection resolves the name again; a name that changes in between could
-    still slip through. Pin the resolved address in the transport if providers ever come from anyone but the archive's owner."""
+def public_addresses(host: str, port: int = 443) -> list[str]:
+    """The addresses a provider's name leads to, if every one is on the public internet. Never this machine or its network,
+    where a credential could be caught."""
     try:
-        found = {info[4][0] for info in socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)}
+        found = list(dict.fromkeys(info[4][0] for info in socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)))
     except OSError:
         raise ProviderError("The provider could not be reached.") from None
     if not found or not all(ipaddress.ip_address(a.split("%")[0]).is_global for a in found):
         raise RefusedAddress("Refused a provider whose name leads to a private or local address.")
+    return found
+
+
+class _PinnedBackend(httpcore.SyncBackend):
+    """Connects only to an address that was just checked, from the one lookup that checked it. TLS is set up afterwards by
+    httpcore with the request's host name, so the certificate must still match the provider's name."""
+
+    def connect_tcp(self, host: str, port: int, timeout: float | None = None, local_address: str | None = None, socket_options=None):
+        problem: Exception | None = None
+        for address in public_addresses(host, port):
+            try:
+                return super().connect_tcp(address, port, timeout, local_address, socket_options)
+            except httpcore.ConnectError as failed:
+                problem = failed
+        raise problem or httpcore.ConnectError("No address could be reached.")
+
+
+def pinned_transport() -> httpx.HTTPTransport:
+    """httpx's own transport, certificate checks and all, with the connection pool using the pinned backend.
+    shortcut: httpx 0.28 has no public option for a network backend, so its pool is rebuilt here. A test fails if this stops
+    taking effect after an upgrade."""
+    transport = httpx.HTTPTransport(trust_env=False)
+    pool = transport._pool
+    transport._pool = httpcore.ConnectionPool(
+        ssl_context=pool._ssl_context, max_connections=pool._max_connections, max_keepalive_connections=pool._max_keepalive_connections,
+        keepalive_expiry=pool._keepalive_expiry, http1=pool._http1, http2=pool._http2, retries=pool._retries, network_backend=_PinnedBackend())
+    return transport
 
 
 class ProviderClient:
     def __init__(self, provider: Provider, transport: httpx.BaseTransport | None = None, sleep=time.sleep) -> None:
         self.provider = provider
         self.sleep = sleep
-        self._real_network = transport is None
-        self._http = httpx.Client(transport=transport, timeout=TIMEOUT, follow_redirects=False, trust_env=False,
+        self._http = httpx.Client(transport=transport or pinned_transport(), timeout=TIMEOUT, follow_redirects=False, trust_env=False,
                                   headers={"User-Agent": "ThisIsYou-connector"})
 
     def close(self) -> None:
         self._http.close()
 
     def _send(self, method: str, url: str, *, limit: int, retry: bool, **kwargs) -> Answer:
-        if self._real_network:
-            refuse_private_host(urlsplit(url).hostname or "")
         for attempt in range(1, ATTEMPTS + 1):
             try:
                 with self._http.stream(method, url, **kwargs) as response:
