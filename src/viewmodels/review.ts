@@ -174,6 +174,8 @@ export function resultLines(store: AppStore, L: ResultInput[], observations: Lab
   /** After a decision the next undecided row is selected, so a review can go straight down the list. */
   const decided = (key: string) => select(nextPending(order, key) ?? key, { rvOpen: null, rvEdit: null });
 
+  // With nothing chosen yet, the first undecided row is the one the keys act on, and it is shown as selected.
+  const current = s.rvLine ?? L.find((l) => l.status === 'pending')?.key ?? null;
   const lines = L.map((l) => {
     const extras = lineExtras(store, observations, l.key);
     const o = extras.observation;
@@ -242,7 +244,7 @@ export function resultLines(store: AppStore, L: ResultInput[], observations: Lab
       isPending,
       isAccepted,
       isRejected,
-      isSelected: s.rvLine === l.key,
+      isSelected: current === l.key,
       isOpen: isOpen || isEditing,
       isEdited: l.edited,
       groupNote: groupDay ? `Accepted as part of a group on ${groupDay}.` : '',
@@ -318,7 +320,7 @@ export function resultLines(store: AppStore, L: ResultInput[], observations: Lab
   const byKey = (key: string | null) => lines.find((l) => l.key === key);
   /** One key, already known not to come from typing. Says which row it moved to, if any. */
   const keys = (key: string): string | null | undefined => {
-    const cur = byKey(store.state.rvLine) ?? lines[0];
+    const cur = byKey(current) ?? lines[0];
     if (!cur) return undefined;
     const i = lines.indexOf(cur);
     if (key === 'ArrowDown' || key === 'j') {
@@ -573,6 +575,20 @@ export function reviewVM(store: AppStore) {
     rvAddMeasurement: (fields: ObservationFields) => store.createObservation(fields, id, false),
     testNames: archive.testNames,
     rvLines: lines,
+    // Accept all: every undecided row whose own button says Accept. Rows needing a look or a value are left for the person.
+    rvAcceptAll: (() => {
+      const ready = lines.filter((l) => l.isPending && l.primary.tone === 'accept');
+      const later = lines.filter((l) => l.isPending).length - ready.length;
+      return {
+        show: ready.length > 1,
+        label: `Accept all ${ready.length}`,
+        note: later ? `${plural(later, 'other')} ${later === 1 ? 'needs' : 'need'} a look first` : '',
+        act: () => {
+          if (real) void store.acceptAll(ready.map((l) => ({ id: l.key, version: l.observation?.version ?? 0 })));
+          else ready.forEach((l) => store.patchReview(id, 'lines', l.key, { status: 'confirmed' }));
+        },
+      };
+    })(),
     rvSelected: s.rvLine,
     rvKey: keys,
     rvApprovedGroups: [...approvedTogether.entries()].map(([groupId, rows]) => ({

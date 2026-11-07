@@ -185,16 +185,30 @@ export function ResultList({ lines, onKey, testNames, label, keysId }: { lines: 
     if (el) buttons.current.set(key, el);
     else buttons.current.delete(key);
   };
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+  const list = useRef<HTMLDivElement>(null);
+  const handle = (e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; target: EventTarget | null; preventDefault: () => void }) => {
     if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
     const moved = onKey(e.key);
     if (moved === undefined) return;
     e.preventDefault();
     if (moved) buttons.current.get(moved)?.focus();
   };
+  const latest = useRef(handle);
+  latest.current = handle;
+  // The letter keys work from anywhere on the page, not only once a row has focus. Arrows stay in the list, so they
+  // still scroll the page elsewhere. Never while typing, and never behind an open dialog.
+  useEffect(() => {
+    const onPage = (e: globalThis.KeyboardEvent) => {
+      if (e.defaultPrevented || !/^[arucjkARUCJK]$/.test(e.key) || list.current?.contains(e.target as Node)) return;
+      if (e.target instanceof Element && e.target.closest('dialog, form, [data-editing]')) return;
+      latest.current(e);
+    };
+    window.addEventListener('keydown', onPage);
+    return () => window.removeEventListener('keydown', onPage);
+  }, []);
   return (
     <div style={{ overflowX: 'auto' }}>
-      <div role="list" aria-label={label} aria-describedby={keysId} onKeyDown={onKeyDown} style={{ minWidth: 600 }}>
+      <div ref={list} role="list" aria-label={label} aria-describedby={keysId} onKeyDown={handle} style={{ minWidth: 600 }}>
         {lines.map((l) => (
           <Row key={l.key} l={l} testNames={testNames} bind={bind} />
         ))}

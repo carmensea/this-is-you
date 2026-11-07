@@ -305,6 +305,7 @@ export async function connectLocalArchive(): Promise<{ api: ArchiveApi; backend:
     correctObservation: (id, fields) => post<LabObservation>(`/api/observations/${id}/correct`, { fields }),
     setObservationStatus: (id, action) => post<LabObservation>(`/api/observations/${id}/${action}`),
     approveGroup: (approval) => post('/api/observations/approve-group', approval),
+    acceptMany: (items) => post('/api/observations/accept-many', { items }),
     undoGroup: (groupId) => post(`/api/observations/group-approvals/${groupId}/undo`),
     createObservation: (fields, documentId, verify) =>
       post<LabObservation>('/api/observations', { fields, document_id: documentId, verify }),

@@ -416,6 +416,31 @@ def approve_group(sessions: sessionmaker[Session], document_id: str, group_key: 
     return group_id
 
 
+def accept_many(sessions: sessionmaker[Session], items: list[GroupItem]) -> int:
+    """A person accepting every result they were shown at once. Each must still be undecided and unchanged, or nothing is accepted.
+
+    Each result gets its own "verified" revision, so each can still be undone on its own.
+    """
+    with sessions() as session:
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        wanted = {item.id: item.version for item in items}
+        found = list(session.scalars(select(Observation).options(selectinload(Observation.revisions)).where(Observation.id.in_(wanted))))
+        if not items or len(wanted) != len(items) or len(found) != len(wanted):
+            raise _not_found()
+        if any(o.verification_status is not ObservationVerification.PROPOSED or version_of(o) != wanted[o.id] for o in found):
+            raise UploadRejected(409, "group_changed", "Some of these changed after they were shown, so nothing was accepted. Check them again.")
+        if any(not o.value_text for o in found):
+            raise _invalid("One of these has no value yet. Enter it from the original before approving.")
+        now = _now()
+        for o in found:
+            o.verification_status = ObservationVerification.VERIFIED
+            o.approved_group_id = None
+            _revise(session, o, RevisionAction.VERIFIED, at=now)
+        session.commit()
+    log.info("%d measurements: verified together", len(found))
+    return len(found)
+
+
 def undo_group(sessions: sessionmaker[Session], group_id: str) -> int:
     """Returns to review whatever that approval still accounts for. Results changed by hand since then stay as they are."""
     with sessions() as session:

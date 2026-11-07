@@ -71,6 +71,8 @@ export interface DocumentsBackend {
   setObservationStatus(id: string, action: 'verify' | 'reject' | 'reopen'): Promise<LabObservation>;
   /** Approves exactly these rows at these versions, or nothing. */
   approveGroup(approval: GroupApproval): Promise<unknown>;
+  /** Accept all: exactly these rows at these versions, every one or none. */
+  acceptMany(items: GroupApproval['items']): Promise<unknown>;
   undoGroup(groupId: string): Promise<unknown>;
   createObservation(
     fields: ObservationFieldValues,

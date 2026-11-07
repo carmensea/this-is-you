@@ -94,6 +94,7 @@ function fakeBackend(): DocumentsBackend {
     correctObservation: vi.fn(async () => obs()),
     setObservationStatus: vi.fn(async () => obs()),
     approveGroup: vi.fn(async () => []),
+    acceptMany: vi.fn(async () => []),
     undoGroup: vi.fn(async () => []),
     createObservation: vi.fn(async () => obs()),
   };
@@ -782,6 +783,40 @@ describe('the review table', () => {
       expect(screen.queryByText(/No measurements were recognized/)).toBeNull();
       expect(screen.getByRole('button', { name: 'Read again with the current reader' })).toBeTruthy();
       expect(screen.getByRole('region', { name: 'Finish this review' }).textContent).toContain('4 document details to decide');
+    });
+    it('Accept all accepts every ready row in one request, and leaves the ones that need a look', async () => {
+      const a = named('Fictional Alpha', { verification_status: 'proposed', version: 3 });
+      const b = named('Fictional Beta', { verification_status: 'proposed', version: 5 });
+      const blank = named('Fictional Blank', { verification_status: 'proposed', value_text: '', value_number: null });
+      const { backend } = openFromList([a, b, blank, named('Fictional Done')]);
+      const all = screen.getByRole('button', { name: 'Accept all 2' });
+      expect(screen.getByText('1 other needs a look first')).toBeTruthy();
+      await act(async () => { fireEvent.click(all); });
+      expect(backend.acceptMany).toHaveBeenCalledTimes(1);
+      expect(backend.acceptMany).toHaveBeenCalledWith([{ id: a.id, version: 3 }, { id: b.id, version: 5 }]);
+      expect(backend.setObservationStatus).not.toHaveBeenCalled();
+    });
+    it('A works as soon as the document opens, on the first undecided row, which is shown selected', async () => {
+      const done = named('Fictional Done');
+      const first = named('Fictional First', { verification_status: 'proposed' });
+      const { backend } = openFromList([done, first, named('Fictional Second', { verification_status: 'proposed' })]);
+      expect(document.activeElement?.tagName).toBe('H1'); // Focus is not in the list.
+      expect(document.querySelector('[data-row][aria-current="true"]')!.textContent).toContain('Fictional First');
+      await act(async () => { fireEvent.keyDown(document.activeElement!, { key: 'a' }); });
+      expect(backend.setObservationStatus).toHaveBeenCalledWith(first.id, 'verify');
+      expect((document.activeElement as HTMLElement).closest('[data-row]')!.textContent).toContain('Fictional Second');
+    });
+    it('the page-wide keys do nothing while typing', () => {
+      const { backend } = openFromList([named('Fictional First', { verification_status: 'proposed' })]);
+      fireEvent.click(screen.getByRole('button', { name: 'Add a measurement the reader missed' }));
+      const input = screen.getByLabelText('Test name');
+      input.focus();
+      fireEvent.keyDown(input, { key: 'a' });
+      expect(backend.setObservationStatus).not.toHaveBeenCalled();
+    });
+    it('offers no Accept all when there is nothing, or only one, to accept', () => {
+      openFromList([named('Fictional Alpha', { verification_status: 'proposed' }), named('Fictional Done')]);
+      expect(screen.queryByRole('button', { name: /^Accept all/ })).toBeNull();
     });
     it('keeps file facts folded away, and the details that need deciding open', () => {
       openFromList([named('Fictional Alpha', { verification_status: 'proposed' })]);

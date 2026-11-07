@@ -333,3 +333,42 @@ def test_logs_hold_no_results_or_names(client, caplog):
 def test_catalog_endpoint(client):
     tests = client.get("/api/lab-tests").json()
     assert {"code": "ldl", "name": "LDL cholesterol", "short": "LDL", "unit": "mg/dL"} in tests
+
+
+def _shown(client, doc):
+    return [{"id": o["id"], "version": o["version"]} for o in rows(client, doc) if o["verification_status"] == "proposed"]
+
+
+def test_accept_all_accepts_exactly_what_was_shown_each_with_its_own_history(client):
+    doc = imported(client, pdfs.LIPID_BOUNDS)
+    response = post(client, "/api/observations/accept-many", {"items": _shown(client, doc)})
+    assert response.status_code == 200, response.text
+    assert [o["verification_status"] for o in rows(client, doc)] == ["verified"] * 4
+    assert all([r["action"] for r in o["revisions"]] == ["extracted", "verified"] for o in rows(client, doc))
+    one = rows(client, doc)[0]
+    post(client, f"/api/observations/{one['id']}/reopen")  # Each can still be undone alone.
+    assert sorted(o["verification_status"] for o in rows(client, doc)) == ["proposed", "verified", "verified", "verified"]
+
+
+@pytest.mark.parametrize("change", ["corrected", "rejected"])
+def test_accept_all_accepts_nothing_if_any_row_changed_after_it_was_shown(client, change):
+    doc = imported(client, pdfs.LIPID_BOUNDS)
+    shown = _shown(client, doc)
+    target = shown[0]["id"]
+    if change == "corrected":
+        post(client, f"/api/observations/{target}/correct", {"fields": {"value_text": "61"}})
+    else:
+        post(client, f"/api/observations/{target}/reject")
+    response = post(client, "/api/observations/accept-many", {"items": shown})
+    assert response.status_code == 409 and response.json()["code"] == "group_changed"
+    assert not verified(client)
+
+
+def test_accept_all_refuses_a_row_with_no_value(client):
+    doc = imported(client, pdfs.LIPID_BOUNDS)
+    blank = rows(client, doc)[0]
+    with client.app.state.engine.begin() as connection:
+        connection.execute(text("UPDATE lab_observations SET value_text = '' WHERE id = :i"), {"i": blank["id"]})
+    response = post(client, "/api/observations/accept-many", {"items": _shown(client, doc)})
+    assert response.status_code == 422
+    assert not verified(client)

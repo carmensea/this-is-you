@@ -324,6 +324,14 @@ function Measurements({ v }: { v: VM }) {
           No measurements were recognized in this document. If it contains results, add them by hand.
         </p>
       )}
+      {v.rvAcceptAll.show && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center', padding: '10px 8px', borderBottom: `1px solid ${C.rule2}` }}>
+          <button onClick={v.rvAcceptAll.act} style={{ background: C.green, color: C.paper, border: `1px solid ${C.green}`, padding: '5px 12px', fontSize: 13, fontWeight: 500 }}>
+            {v.rvAcceptAll.label}
+          </button>
+          {v.rvAcceptAll.note && <span style={s.body125}>{v.rvAcceptAll.note}</span>}
+        </div>
+      )}
       {v.rvLines.length > 0 && <ResultList lines={v.rvLines} onKey={v.rvKey} testNames={v.testNames} label="Measurements, in the order printed" keysId="review-keys" />}
       {v.rvReplaced.length > 0 && (
         <details style={{ borderTop: `1px solid ${C.rule2}`, padding: '10px 8px 0' }}>

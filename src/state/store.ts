@@ -656,6 +656,7 @@ export class AppStore {
   }
 
   approveGroup = (approval: GroupApproval) => this.groupAction((backend) => backend.approveGroup(approval));
+  acceptAll = (items: GroupApproval['items']) => this.groupAction((backend) => backend.acceptMany(items));
   undoGroup = (groupId: string) => this.groupAction((backend) => backend.undoGroup(groupId));
 
   private async attempt(

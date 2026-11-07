@@ -51,7 +51,7 @@ function backendWith(answer: Answer = { state: 'stored' }, documents = [toArchiv
     listObservations: vi.fn(async () => []),
     correctObservation: vi.fn(),
     setObservationStatus: vi.fn(),
-    approveGroup: vi.fn(),
+    approveGroup: vi.fn(), acceptMany: vi.fn(),
     undoGroup: vi.fn(),
     createObservation: vi.fn(),
   };

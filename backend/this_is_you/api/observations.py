@@ -88,6 +88,18 @@ async def approve_group(request: Request) -> ObservationList:
     return await run_in_threadpool(list_all, request)
 
 
+class AcceptManyBody(BaseModel):
+    items: list[GroupRow] = Field(min_length=1, max_length=500)
+
+
+@router.post("/observations/accept-many", response_model=ObservationList)
+async def accept_many(request: Request) -> ObservationList:
+    """Accept all: the exact rows and versions the person was shown, every one or none."""
+    body = await read_json(request, AcceptManyBody, 256 * 1024)
+    await run_in_threadpool(service.accept_many, request.app.state.sessions, [service.GroupItem(row.id, row.version) for row in body.items])
+    return await run_in_threadpool(list_all, request)
+
+
 @router.post("/observations/group-approvals/{group_id}/undo", response_model=ObservationList)
 def undo_group(request: Request, group_id: ObservationId) -> ObservationList:
     service.undo_group(request.app.state.sessions, group_id)
